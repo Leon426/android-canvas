@@ -264,6 +264,7 @@ export function IconBtn({
   fill,
   hasPopup,
   expanded,
+  transparentOn,
 }: {
   icon: string;
   on?: boolean;
@@ -277,6 +278,8 @@ export function IconBtn({
   /** the button opens a menu or a list, and whether it is open now */
   hasPopup?: "menu" | "listbox";
   expanded?: boolean;
+  /** keep selected foreground semantics while a shared indicator paints the background */
+  transparentOn?: boolean;
 }) {
   return (
     <button
@@ -292,7 +295,7 @@ export function IconBtn({
         height: size,
         borderRadius: size / 2,
         border: "none",
-        background: on ? (danger ? p.errorContainer : p.secondaryContainer) : "transparent",
+        background: on && !transparentOn ? (danger ? p.errorContainer : p.secondaryContainer) : "transparent",
         color: disabled
           ? p.outlineVariant
           : danger
@@ -1413,8 +1416,12 @@ export function Section({
   p,
   children,
   right,
+  open: controlledOpen,
   defaultOpen = true,
   onToggle,
+  m3Card = false,
+  card = !m3Card,
+  collapsible = m3Card || !defaultOpen,
 }: {
   id: string;
   icon: string;
@@ -1422,28 +1429,80 @@ export function Section({
   p: Palette;
   children: React.ReactNode;
   right?: React.ReactNode;
+  open?: boolean;
   defaultOpen?: boolean;
   /** called after the user opens or collapses the section by hand */
   onToggle?: (open: boolean) => void;
+  /** palette/category navigation uses a filled M3 list-item treatment */
+  m3Card?: boolean;
+  /** render as an M3 card container */
+  card?: boolean;
+  /** whether the section can be collapsed/expanded */
+  collapsible?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  if (card && !collapsible) {
+    return (
+      <div
+        style={{
+          marginBottom: 10,
+          borderRadius: 18,
+          background: p.surfaceContainerLow,
+          padding: "12px 14px 14px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            minHeight: 28,
+            marginBottom: 10,
+            color: p.onSurface,
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: 0.4,
+          }}
+        >
+          <Icon name={icon} size={18} />
+          <span style={{ flex: 1 }}>{title}</span>
+          {right}
+        </div>
+        <div>{children}</div>
+      </div>
+    );
+  }
+  const [internalOpen, setInternalOpen] = useState(() => {
+    if (controlledOpen !== undefined) return controlledOpen;
+    if (typeof window !== "undefined") {
+      try {
+        const v = localStorage.getItem(`m3e:sec:${id}`);
+        if (v !== null) return v === "1";
+      } catch {}
+    }
+    return defaultOpen;
+  });
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
+    if (controlledOpen !== undefined) return;
     try {
       const v = localStorage.getItem(`m3e:sec:${id}`);
-      if (v !== null) setOpen(v === "1");
+      if (v !== null) setInternalOpen((cur) => (cur === (v === "1") ? cur : v === "1"));
     } catch {}
-  }, [id]);
+  }, [id, controlledOpen]);
   const toggle = () => {
     const next = !open;
-    try {
-      localStorage.setItem(`m3e:sec:${id}`, next ? "1" : "0");
-    } catch {}
-    setOpen(next);
+    if (controlledOpen === undefined) {
+      try {
+        localStorage.setItem(`m3e:sec:${id}`, next ? "1" : "0");
+      } catch {}
+      setInternalOpen(next);
+    }
     onToggle?.(next);
   };
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 36 }}>
+    <div style={{ marginBottom: m3Card ? 8 : 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, height: m3Card ? 48 : 36 }}>
         <button
           onClick={toggle}
           aria-expanded={open}
@@ -1452,14 +1511,14 @@ export function Section({
             display: "flex",
             alignItems: "center",
             gap: 8,
-            height: 36,
-            padding: "0 6px",
+            height: m3Card ? 48 : 36,
+            padding: m3Card ? "0 14px" : "0 6px",
             border: "none",
-            background: "transparent",
-            color: p.onSurfaceVariant,
+            background: m3Card ? (open ? p.secondaryContainer : p.surfaceContainerLow) : "transparent",
+            color: m3Card && open ? p.onSecondaryContainer : p.onSurfaceVariant,
             cursor: "pointer",
-            borderRadius: 12,
-            fontSize: 12,
+            borderRadius: m3Card ? 18 : 12,
+            fontSize: m3Card ? 13 : 12,
             fontWeight: 700,
             letterSpacing: 0.4,
             textAlign: "left",
@@ -1467,11 +1526,30 @@ export function Section({
         >
           <Icon name={icon} size={18} />
           <span style={{ flex: 1 }}>{title}</span>
-          <Icon name={open ? "expand_less" : "expand_more"} size={18} />
+          {m3Card ? (
+            <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.2, ease: [0.2, 0, 0, 1] }} style={{ display: "inline-flex" }}>
+              <Icon name="expand_more" size={18} />
+            </motion.span>
+          ) : <Icon name={open ? "expand_less" : "expand_more"} size={18} />}
         </button>
         {right}
       </div>
-      {open && <div style={{ padding: "6px 4px 14px" }}>{children}</div>}
+      {m3Card ? (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              key="content"
+              initial={{ height: 0, opacity: 0, y: -6 }}
+              animate={{ height: "auto", opacity: 1, y: 0 }}
+              exit={{ height: 0, opacity: 0, y: -4 }}
+              transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.2, 0, 0, 1] }}
+              style={{ overflow: "hidden" }}
+            >
+              <div style={{ padding: "10px 4px 14px" }}>{children}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      ) : open && <div style={{ padding: "6px 4px 14px" }}>{children}</div>}
     </div>
   );
 }

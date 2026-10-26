@@ -28,6 +28,9 @@ import { AlignBox, PartMenu, PlaceFn } from "./PartPanel";
 import { Icon } from "./M3Node";
 import { PanelShell, Section, Segmented } from "./ui";
 import { TRANSITION_TEXT, t, useLang } from "@/lib/i18n";
+import type { ComponentLibrary } from "@/lib/componentLibrary";
+
+const CUSTOMIZABLE_KINDS = new Set<Kind>(["topAppBar", "bottomNav", "fab", "extendedFab", "button", "card"]);
 
 export function variantsOf(kind: Kind): { key: Variant; label: string }[] {
   const variants = VARIANTS.map((v) => ({ ...v, label: t(v.key) }));
@@ -364,6 +367,10 @@ export function Inspector({
   allFrames,
   onShowOn,
   onShowMenu,
+  componentLibrary,
+  onSaveAsComponent,
+  onUpdateComponent,
+  onDetachComponent,
 }: {
   /** the AI button beside the behavior field */
   ai: AiHooks;
@@ -401,6 +408,10 @@ export function Inspector({
   onShowOn?: (on: boolean) => void;
   /** asks the canvas to show a FAB's menu open while it is being set up */
   onShowMenu?: (open: boolean) => void;
+  componentLibrary?: ComponentLibrary;
+  onSaveAsComponent?: (name: string) => void;
+  onUpdateComponent?: () => void;
+  onDetachComponent?: () => void;
 }) {
   const lang = useLang();
 
@@ -439,14 +450,9 @@ export function Inspector({
     );
   }
 
-  /* the parts a tap sends somewhere and that fuse into a run are edited in the button's panel */
-  if (item.kind === "button" || item.kind === "iconButton" || item.kind === "chip" || item.kind === "splitButton" || isFab(item.kind)) {
-    return <ButtonInspector ai={ai} item={item} palette={p} frame={frame ?? null} onChange={onChange} onDelete={onDelete} onDuplicate={onDuplicate} locked={locked} onToggleLock={onToggleLock} onPlace={onPlace} measured={widths?.[item.id]} selfRect={selfRect ?? null} allFrames={allFrames ?? frames} onShowOn={onShowOn} onShowMenu={onShowMenu} />;
-  }
-
-  /* everything else shares one panel, built from the button's own */
-  return (
-    <PartInspector
+  const editor = item.kind === "button" || item.kind === "iconButton" || item.kind === "chip" || item.kind === "splitButton" || isFab(item.kind)
+    ? <ButtonInspector ai={ai} item={item} palette={p} frame={frame ?? null} onChange={onChange} onDelete={onDelete} onDuplicate={onDuplicate} locked={locked} onToggleLock={onToggleLock} onPlace={onPlace} measured={widths?.[item.id]} selfRect={selfRect ?? null} allFrames={allFrames ?? frames} onShowOn={onShowOn} onShowMenu={onShowMenu} />
+    : <PartInspector
       ai={ai}
       item={item}
       palette={p}
@@ -461,6 +467,40 @@ export function Inspector({
       allFrames={allFrames ?? frames}
       measured={widths?.[item.id]}
       railStandalone={railStandalone}
-    />
+    />;
+
+  if (!CUSTOMIZABLE_KINDS.has(item.kind) || !onSaveAsComponent) return editor;
+
+  const definition = item.component ? componentLibrary?.packages
+    .find((pack) => !item.component?.packageId || pack.id === item.component.packageId)
+    ?.definitions.find((entry) => entry.id === item.component?.definitionId) : undefined;
+  const copy = lang === "zh"
+    ? { save: "另存为组件", update: "更新组件", detach: "脱离组件", prompt: "组件名称" }
+    : lang === "ja"
+      ? { save: "コンポーネントとして保存", update: "コンポーネントを更新", detach: "切り離す", prompt: "コンポーネント名" }
+      : lang === "ko"
+        ? { save: "컴포넌트로 저장", update: "컴포넌트 업데이트", detach: "연결 해제", prompt: "컴포넌트 이름" }
+        : { save: "Save as component", update: "Update component", detach: "Detach", prompt: "Component name" };
+  const buttonStyle = { border: "none", borderRadius: 18, padding: "8px 12px", background: p.surfaceContainerHigh, color: p.onSurface, cursor: "pointer", font: "inherit", fontSize: 12 } as const;
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${p.outlineVariant}` }}>
+        <Icon name="deployed_code" size={18} />
+        {definition ? (
+          <>
+            <span title={definition.name} style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 650 }}>{definition.name}</span>
+            <button style={buttonStyle} onClick={onUpdateComponent}>{copy.update}</button>
+            <button style={buttonStyle} onClick={onDetachComponent}>{copy.detach}</button>
+          </>
+        ) : (
+          <button style={{ ...buttonStyle, width: "100%" }} onClick={() => {
+            const name = window.prompt(copy.prompt, item.label || item.kind)?.trim();
+            if (name) onSaveAsComponent(name);
+          }}>{copy.save}</button>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>{editor}</div>
+    </div>
   );
 }

@@ -1,4 +1,5 @@
-import { CAROUSEL_LAYOUTS, DATE_LAYOUTS, Doc, KIND_ORDER, Kind, TIME_LAYOUTS, VARIANTS, isCardAlign, isCardImagePos, isPlace, isTextToken, isPlatform, isTrackThickness } from "./tokens";
+import { CAROUSEL_LAYOUTS, COLOR_TOKENS, DATE_LAYOUTS, Doc, KIND_ORDER, Kind, TIME_LAYOUTS, VARIANTS, isCardAlign, isCardImagePos, isPlace, isTextToken, isPlatform, isTrackThickness } from "./tokens";
+import type { ComponentLibrary, ComponentLibraryV1, ComponentStyle } from "./componentLibrary";
 
 /* A project file is the Doc as JSON, nothing more. Reading one back only checks
  * the shape the editor relies on; the same migrations that run on a saved
@@ -17,8 +18,39 @@ const validCorners = (c: unknown) => c === undefined || (isRecord(c) && ["tl", "
 const LAYOUTS = new Set<string>([...CAROUSEL_LAYOUTS, ...DATE_LAYOUTS, ...TIME_LAYOUTS].map((l) => l.key));
 const optionalNumber = (v: unknown) => v === undefined || Number.isFinite(v);
 
+const validStyle = (value: unknown): value is ComponentStyle => {
+  if (!isRecord(value)) return false;
+  const allowed = new Set(["variant", "size", "size2", "radiusTop", "radiusBottom", "corners", "fill", "iconFill", "textColor", "bold"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return false;
+  return (value.variant === undefined || VARIANTS.some((variant) => variant.key === value.variant)) &&
+    optionalNumber(value.size) && optionalNumber(value.size2) && optionalNumber(value.radiusTop) && optionalNumber(value.radiusBottom) &&
+    validCorners(value.corners) && (value.bold === undefined || typeof value.bold === "boolean") &&
+    (value.fill === undefined || COLOR_TOKENS.some((token) => token.key === value.fill)) &&
+    (value.iconFill === undefined || value.iconFill === "none" || COLOR_TOKENS.some((token) => token.key === value.iconFill)) &&
+    (value.textColor === undefined || isTextToken(value.textColor));
+};
+
+const validComponentInstance = (value: unknown) => value === undefined || (isRecord(value) &&
+  (value.packageId === undefined || typeof value.packageId === "string") &&
+  typeof value.definitionId === "string" && value.definitionId.length > 0 &&
+  (value.overrides === undefined || validStyle(value.overrides)));
+
+const validDefinitions = (value: unknown) => Array.isArray(value) && value.every((definition) => isRecord(definition) && typeof definition.id === "string" && definition.id.length > 0 &&
+    typeof definition.name === "string" && typeof definition.baseKind === "string" && KINDS.has(definition.baseKind) &&
+    (definition.description === undefined || typeof definition.description === "string") &&
+    (definition.extends === undefined || typeof definition.extends === "string") && validStyle(definition.style)) &&
+  new Set(value.map((definition) => definition.id)).size === value.length;
+
+const validComponentLibrary = (value: unknown): value is ComponentLibrary | ComponentLibraryV1 => value === undefined || (isRecord(value) && (
+  (value.schemaVersion === 1 && validDefinitions(value.definitions)) ||
+  (value.schemaVersion === 2 && typeof value.activePackageId === "string" && Array.isArray(value.packages) &&
+    value.packages.every((pack) => isRecord(pack) && typeof pack.id === "string" && pack.id.length > 0 && typeof pack.name === "string" && validDefinitions(pack.definitions)) &&
+    new Set(value.packages.map((pack) => pack.id)).size === value.packages.length)
+));
+
 const validItem = (item: unknown) =>
   isRecord(item) &&
+  validComponentInstance(item.component) &&
   validCorners(item.corners) &&
   (item.railExpanded === undefined || typeof item.railExpanded === "boolean") &&
   (item.railModal === undefined || typeof item.railModal === "boolean") &&
@@ -72,7 +104,7 @@ const validFrame = (frame: unknown) =>
 
 /** whether a parsed file has the shape of a document the editor can open */
 export const isProject = (value: unknown): value is Doc =>
-  isRecord(value) && Array.isArray(value.groups) && Array.isArray(value.frames) && value.groups.every(validGroup) && value.frames.every(validFrame) && (value.platform === undefined || isPlatform(value.platform)) && (value.promptOptions === undefined || (Array.isArray(value.promptOptions) && value.promptOptions.every((o) => typeof o === "string")));
+  isRecord(value) && Array.isArray(value.groups) && Array.isArray(value.frames) && value.groups.every(validGroup) && value.frames.every(validFrame) && validComponentLibrary(value.componentLibrary) && (value.platform === undefined || isPlatform(value.platform)) && (value.promptOptions === undefined || (Array.isArray(value.promptOptions) && value.promptOptions.every((o) => typeof o === "string")));
 
 /** the file name a project is saved under: m3e-canvas, followed by the app's name when it has one */
 export const projectFileName = (doc: Doc) => {

@@ -66,6 +66,7 @@ import {
   sizeOf,
   isCardImagePos,
   paletteOf,
+  canvasPaletteOf,
   DEFAULT_THEME,
   CARD_MEDIA_GAP,
   CARD_PADDING,
@@ -459,6 +460,15 @@ describe("card image placement helpers", () => {
     expect(cardScrimOf("#ffffff", "end")).toMatch(/^linear-gradient\(rgba\(0,0,0,0\) 40%/);
     expect(cardScrimOf("#1a1a1a", "start")).toMatch(/^linear-gradient\(rgba\(255,255,255,0\.72\)/);
     expect(cardScrimOf("#ffffff", "center")).toMatch(/^rgba\(0,0,0,/);
+  });
+
+  it("keeps canvas palette on standard contrast regardless of theme contrast", () => {
+    const light = canvasPaletteOf("purple", undefined, false);
+    const dark = canvasPaletteOf("purple", undefined, true);
+    expect(light.outlineVariant).toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, contrast: "standard" }).outlineVariant);
+    expect(light.outlineVariant).not.toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, contrast: "high" }).outlineVariant);
+    expect(dark.outlineVariant).toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, dark: true, contrast: "standard" }).outlineVariant);
+    expect(dark.outlineVariant).not.toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, dark: true, contrast: "high" }).outlineVariant);
   });
 
 });

@@ -15,6 +15,23 @@ const withItem = (patch: Record<string, unknown>) => {
 };
 
 describe("isProject", () => {
+  it("accepts a versioned component library and component instances", () => {
+    const value = withItem({ component: { definitionId: "primary-action", overrides: { radiusTop: 8 } } });
+    value.componentLibrary = { schemaVersion: 1, definitions: [{
+      id: "primary-action", name: "Primary action", baseKind: "button", style: { variant: "tonal", radiusBottom: 16 },
+    }] };
+    expect(isProject(value)).toBe(true);
+  });
+
+  it("rejects malformed component libraries and instance overrides", () => {
+    expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 2, definitions: [] } })).toBe(false);
+    expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 1, definitions: [
+      { id: "same", name: "One", baseKind: "button", style: {} },
+      { id: "same", name: "Two", baseKind: "button", style: {} },
+    ] } })).toBe(false);
+    expect(isProject(withItem({ component: { definitionId: "x", overrides: { label: "not style" } } }))).toBe(false);
+  });
+
   it("accepts a current document without changing it", () => {
     const value = doc();
     const before = structuredClone(value);

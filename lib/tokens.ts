@@ -546,6 +546,12 @@ export function paletteOf(key: string, custom?: Palette | null, theme?: Theme): 
   return { ...schemeFromSeed(seed, base.label, { dark: theme.dark, contrast: theme.contrast, keepChroma: base.key !== "custom" }), key: base.key };
 }
 
+/** The scheme the canvas workspace floor and dot grid render with: always standard contrast
+ *  so adjusting contrast in theme settings does not alter the canvas floor or its grid dots. */
+export function canvasPaletteOf(key: string, custom?: Palette | null, dark?: boolean): Palette {
+  return paletteOf(key, custom, { ...DEFAULT_THEME, dark: !!dark, contrast: "standard" });
+}
+
 /* ---------- contrast roles a component can take ---------- */
 export type Variant = "filled" | "tonal" | "elevated" | "outlined" | "text";
 
@@ -1630,6 +1636,8 @@ export type Item = {
   icon: string | null;
   icon2?: string | null;
   variant: Variant;
+  /** optional reusable component definition plus visual overrides for this instance */
+  component?: import("./componentLibrary").ComponentInstance;
   supporting?: string;
   size?: number;
   radiusTop?: number;
@@ -2365,6 +2373,8 @@ export type Doc = {
   promptOptions?: string[];
   /** shape, type, motion and the light / dark and contrast switches */
   theme?: Theme;
+  /** reusable author-defined components; omitted by legacy projects */
+  componentLibrary?: import("./componentLibrary").ComponentLibrary | import("./componentLibrary").ComponentLibraryV1;
 };
 
 export const defaultTabs = (): NavTab[] => NAV_TABS[getLang()].map((t) => ({ ...t }));
