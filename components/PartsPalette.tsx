@@ -72,7 +72,7 @@ export function PartsPalette({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
-      <div className="no-scrollbar" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "6px 14px 20px" }}>
+      <div className="no-scrollbar" style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "6px 8px 20px 14px" }}>
         {CATEGORIES.map((c) => (
           <Section
             key={c.key}

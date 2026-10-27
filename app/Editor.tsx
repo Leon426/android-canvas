@@ -447,9 +447,9 @@ function ThinkingRing({ p, frame }: { p: Palette; frame: Frame }) {
 
 type LeftTab = "parts" | "library" | "layers" | "color" | "shape" | "type" | "motion" | "ai";
 /** the left rail: parts and layers, then the four theme axes of the whole design */
-const LEFT_TABS: { key: LeftTab; icon: string; title: "parts" | "layers" | "colors" | "shape" | "typography" | "motion" | "ai" }[] = [
+const LEFT_TABS: { key: LeftTab; icon: string; title: "parts" | "componentLibrary" | "layers" | "colors" | "shape" | "typography" | "motion" | "ai" }[] = [
   { key: "parts", icon: "add_box", title: "parts" },
-  { key: "library", icon: "deployed_code", title: "parts" },
+  { key: "library", icon: "deployed_code", title: "componentLibrary" },
   { key: "layers", icon: "layers", title: "layers" },
   { key: "color", icon: "palette", title: "colors" },
   { key: "shape", icon: "rounded_corner", title: "shape" },
@@ -1142,46 +1142,41 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const fitRef = useRef(fit);
   fitRef.current = fit;
 
-  /* Automatically re-fit and center canvas elements whenever the canvas container deforms
-   * (e.g. left/right panels expanding/collapsing, window resize, split screen) */
+  /* Automatically adjust canvas viewport on container resize */
   useEffect(() => {
     const el = canvasRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     let prevW = 0;
     let prevH = 0;
-    let rafId: number | null = null;
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry) return;
       const { width, height } = entry.contentRect;
       if (width <= 0 || height <= 0) return;
-      if (Math.abs(width - prevW) < 2 && Math.abs(height - prevH) < 2) return;
+      if (Math.abs(width - prevW) < 1 && Math.abs(height - prevH) < 1) return;
       const hadSize = prevW > 0 && prevH > 0;
+      const dw = width - prevW;
+      const dh = height - prevH;
       prevW = width;
       prevH = height;
+
+      if (!hadSize) {
+        fitRef.current(false);
+        return;
+      }
       if (gestureRef.current !== null || dragRef.current?.active) return;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => {
-        fitRef.current(hadSize);
-      });
+      // Shift viewport center by delta, preserving user's manual zoom
+      setView((cur) => ({
+        ...cur,
+        x: cur.x + dw / 2,
+        y: cur.y + dh / 2,
+      }));
     });
     ro.observe(el);
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
       ro.disconnect();
     };
   }, []);
-
-  /* Keep elements centered when left or right sidebar changes */
-  useEffect(() => {
-    if (!loadedRef.current) return;
-    const timer = setTimeout(() => {
-      if (gestureRef.current === null && !dragRef.current?.active) {
-        fitRef.current(true);
-      }
-    }, 280);
-    return () => clearTimeout(timer);
-  }, [leftOpen, rightOpen, leftW, rightW, isMobile]);
 
   /* touch: two fingers pinch-zoom and pan, cancelling whatever one finger started */
   const onTouchCapture = (e: React.PointerEvent) => {
@@ -2738,7 +2733,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     try {
       localStorage.removeItem(BEFORE_KEY);
     } catch {}
-    snapshot();
+    snapshot(true);
     const newFrame: Frame = { id: uid(), name: t("home", lang), x: 0, y: 0 };
     framesRef.current = [newFrame];
     groupsRef.current = [];
@@ -4439,7 +4434,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                         palette={p}
                         value={componentLibrary.activePackageId}
                         onChange={(activePackageId) => setComponentLibrary((library) => ({ ...library, activePackageId }))}
-                        label={lang === "zh" ? "官方组件包" : "Official components"}
+                        label={t("officialPackage", lang)}
                       />
                     </div>
                     <div style={{ flex: 1, minHeight: 0 }}>
@@ -4453,13 +4448,13 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                         />
                       ) : (() => {
                         const pack = componentLibrary.packages.find((entry) => entry.id === componentLibrary.activePackageId);
-                        return <div style={{ padding: 14, display: "grid", gap: 8, overflowY: "auto", maxHeight: "100%" }}>
+                        return <div className="no-scrollbar" style={{ padding: "14px 8px 14px 14px", display: "grid", gap: 8, overflowY: "auto", maxHeight: "100%" }}>
                           {pack?.definitions.length ? pack.definitions.map((definition) => (
                             <button key={definition.id} onClick={() => addPart(definition.baseKind, { packageId: pack.id, definitionId: definition.id })} style={{ border: "none", borderRadius: 16, padding: 14, textAlign: "left", background: p.surfaceContainerLow, color: p.onSurface, cursor: "pointer", font: "inherit" }}>
                               <div style={{ fontWeight: 700 }}>{definition.name}</div>
                               <div style={{ marginTop: 4, fontSize: 11, color: p.onSurfaceVariant }}>{definition.baseKind}</div>
                             </button>
-                          )) : <div style={{ padding: 16, borderRadius: 16, background: p.surfaceContainerLow, color: p.onSurfaceVariant, fontSize: 12, lineHeight: 1.5 }}>{lang === "zh" ? "这个组件包还是空的。先在画布中选择一个官方组件，再从右侧另存为组件。" : "This package is empty. Save a canvas part as a component first."}</div>}
+                          )) : <div style={{ padding: 16, borderRadius: 16, background: p.surfaceContainerLow, color: p.onSurfaceVariant, fontSize: 12, lineHeight: 1.5 }}>{t("emptyPackage", lang)}</div>}
                         </div>;
                       })()}
                     </div>
@@ -4469,18 +4464,24 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                     library={componentLibrary}
                     palette={p}
                     onActive={(activePackageId) => setComponentLibrary((library) => ({ ...library, activePackageId }))}
-                    onCreate={(name) => setComponentLibrary((library) => {
-                      const id = uid();
-                      return { ...library, activePackageId: id, packages: [...library.packages, { id, name, definitions: [] }] };
-                    })}
-                    onRename={(id, name) => setComponentLibrary((library) => ({
-                      ...library,
-                      packages: library.packages.map((pack) => pack.id === id ? { ...pack, name } : pack),
-                    }))}
+                    onCreate={(name) => {
+                      snapshot(true);
+                      setComponentLibrary((library) => {
+                        const id = uid();
+                        return { ...library, activePackageId: id, packages: [...library.packages, { id, name, definitions: [] }] };
+                      });
+                    }}
+                    onRename={(id, name) => {
+                      snapshot(true);
+                      setComponentLibrary((library) => ({
+                        ...library,
+                        packages: library.packages.map((pack) => pack.id === id ? { ...pack, name } : pack),
+                      }));
+                    }}
                     onDelete={(id) => {
                       const removed = componentLibrary.packages.find((pack) => pack.id === id);
                       if (!removed) return;
-                      snapshot();
+                      snapshot(true);
                       const definitionIds = new Set(removed.definitions.map((definition) => definition.id));
                       setGroups((current) => current.map((group) => ({
                         ...group,
@@ -5207,6 +5208,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   componentLibrary={componentLibrary}
                   onSaveAsComponent={(name) => {
                     if (!selected) return;
+                    snapshot(true);
                     const id = uid();
                     const active = componentLibrary.activePackageId;
                     const packageId = active === OFFICIAL_PACKAGE_ID ? (componentLibrary.packages[0]?.id ?? DEFAULT_CUSTOM_PACKAGE_ID) : active;
@@ -5218,13 +5220,14 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                         activePackageId: packageId,
                         packages: exists
                           ? library.packages.map((pack) => pack.id === packageId ? { ...pack, definitions: [...pack.definitions, definition] } : pack)
-                          : [...library.packages, { id: packageId, name: "自定义组件包 1", definitions: [definition] }],
+                          : [...library.packages, { id: packageId, name: `${t("customPackageDefault", lang)} 1`, definitions: [definition] }],
                       };
                     });
                     patchSelected({ component: { packageId, definitionId: id } });
                   }}
                   onUpdateComponent={() => {
                     if (!selected?.component) return;
+                    snapshot(true);
                     const ref = selected.component;
                     setComponentLibrary((library) => ({
                       ...library,

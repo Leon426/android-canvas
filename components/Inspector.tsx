@@ -26,7 +26,7 @@ import { ButtonInspector } from "./ButtonInspector";
 import { PartInspector } from "./PartInspector";
 import { AlignBox, PartMenu, PlaceFn } from "./PartPanel";
 import { Icon } from "./M3Node";
-import { PanelShell, Section, Segmented } from "./ui";
+import { InputDialog, PanelShell, Section, Segmented } from "./ui";
 import { TRANSITION_TEXT, t, useLang } from "@/lib/i18n";
 import type { ComponentLibrary } from "@/lib/componentLibrary";
 
@@ -149,6 +149,7 @@ export function FrameSizePicker({
   compact?: boolean;
 }) {
   const lang = useLang();
+  const [promptOpen, setPromptOpen] = useState(false);
   return (
     <Segmented<FramePreset>
       options={[
@@ -414,6 +415,7 @@ export function Inspector({
   onDetachComponent?: () => void;
 }) {
   const lang = useLang();
+  const [promptOpen, setPromptOpen] = useState(false);
 
   if (!item) {
     if (multi > 1) {
@@ -474,13 +476,6 @@ export function Inspector({
   const definition = item.component ? componentLibrary?.packages
     .find((pack) => !item.component?.packageId || pack.id === item.component.packageId)
     ?.definitions.find((entry) => entry.id === item.component?.definitionId) : undefined;
-  const copy = lang === "zh"
-    ? { save: "另存为组件", update: "更新组件", detach: "脱离组件", prompt: "组件名称" }
-    : lang === "ja"
-      ? { save: "コンポーネントとして保存", update: "コンポーネントを更新", detach: "切り離す", prompt: "コンポーネント名" }
-      : lang === "ko"
-        ? { save: "컴포넌트로 저장", update: "컴포넌트 업데이트", detach: "연결 해제", prompt: "컴포넌트 이름" }
-        : { save: "Save as component", update: "Update component", detach: "Detach", prompt: "Component name" };
   const buttonStyle = { border: "none", borderRadius: 18, padding: "8px 12px", background: p.surfaceContainerHigh, color: p.onSurface, cursor: "pointer", font: "inherit", fontSize: 12 } as const;
 
   return (
@@ -490,14 +485,27 @@ export function Inspector({
         {definition ? (
           <>
             <span title={definition.name} style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 650 }}>{definition.name}</span>
-            <button style={buttonStyle} onClick={onUpdateComponent}>{copy.update}</button>
-            <button style={buttonStyle} onClick={onDetachComponent}>{copy.detach}</button>
+            <button style={buttonStyle} onClick={onUpdateComponent}>{t("updateComponent", lang)}</button>
+            <button style={buttonStyle} onClick={onDetachComponent}>{t("detachComponent", lang)}</button>
           </>
         ) : (
-          <button style={{ ...buttonStyle, width: "100%" }} onClick={() => {
-            const name = window.prompt(copy.prompt, item.label || item.kind)?.trim();
-            if (name) onSaveAsComponent(name);
-          }}>{copy.save}</button>
+          <>
+            <button style={{ ...buttonStyle, width: "100%" }} onClick={() => setPromptOpen(true)}>
+              {t("saveAsComponent", lang)}
+            </button>
+            <InputDialog
+              open={promptOpen}
+              title={t("saveAsComponent", lang)}
+              placeholder={t("componentName", lang)}
+              initialValue={item.label || item.kind}
+              palette={p}
+              onCancel={() => setPromptOpen(false)}
+              onConfirm={(name) => {
+                setPromptOpen(false);
+                onSaveAsComponent(name);
+              }}
+            />
+          </>
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>{editor}</div>

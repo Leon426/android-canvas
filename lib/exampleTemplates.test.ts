@@ -32,6 +32,13 @@ describe("exampleTemplates", () => {
 
     const orDivider = allItems.find((it) => it.kind === "divider" && it.label === "OR");
     expect(orDivider).toBeDefined();
+    expect(orDivider?.fill).toBe("inverseSurface");
+
+    const disclaimer = allItems.find((it) => it.label?.includes("By continuing"));
+    expect(disclaimer).toBeDefined();
+    expect(disclaimer?.size2).toBe(320);
+    expect(disclaimer?.textAlign).toBe("center");
+    expect(disclaimer?.textColor).toBe("onSurfaceVariant");
 
     // Check that all positions are within 360 width of origin
     for (const g of groups) {

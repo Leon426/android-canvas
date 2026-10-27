@@ -70,7 +70,7 @@ export function PanelShell({
           className="no-scrollbar"
           inert={locked || undefined}
           /* under a row of tabs the content starts below them; with none, it starts under the fade's thick part */
-          style={{ padding: `${tabs ? PANEL_TABS_H + PANEL_TABS_GAP : PANEL_FADE_H / 2}px 12px 20px`, overflowY: "auto", height: "100%" }}
+          style={{ padding: `${tabs ? PANEL_TABS_H + PANEL_TABS_GAP : PANEL_FADE_H / 2}px 6px 20px 12px`, overflowY: "auto", height: "100%" }}
         >
           {children}
         </div>
@@ -2004,6 +2004,160 @@ export function ConfirmDialog({
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               {btn(t("cancel", lang), false, onCancel)}
               {btn(t("ok", lang), true, onConfirm)}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+export function InputDialog({
+  open,
+  title,
+  placeholder,
+  initialValue = "",
+  confirmLabel,
+  icon = "deployed_code",
+  palette: p,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  placeholder?: string;
+  initialValue?: string;
+  confirmLabel?: string;
+  icon?: string;
+  palette: Palette;
+  onCancel: () => void;
+  onConfirm: (value: string) => void;
+}) {
+  const lang = useLang();
+  const [val, setVal] = useState(initialValue);
+  useEffect(() => {
+    if (open) setVal(initialValue);
+  }, [open, initialValue]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onCancel();
+      }
+      if (e.key === "Enter" && val.trim()) {
+        e.stopPropagation();
+        onConfirm(val.trim());
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, val, onCancel, onConfirm]);
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="scrim"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          onClick={onCancel}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 600,
+            background: "rgba(0,0,0,0.32)",
+            display: "grid",
+            placeItems: "center",
+            padding: 24,
+          }}
+        >
+          <motion.div
+            role="dialog"
+            aria-modal
+            aria-label={title}
+            initial={{ scale: 0.92, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.96, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 520, damping: 34, mass: 0.7 }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(100%, 340px)",
+              padding: 24,
+              borderRadius: 28,
+              background: p.surfaceContainerHigh,
+              color: p.onSurface,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.10)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <div style={{ textAlign: "center", color: p.primary }}>
+              <Icon name={icon} size={28} />
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, textAlign: "center" }}>{title}</div>
+            <input
+              autoFocus
+              value={val}
+              placeholder={placeholder}
+              onChange={(e) => setVal(e.target.value)}
+              style={{
+                height: 44,
+                borderRadius: 12,
+                padding: "0 14px",
+                border: `1.5px solid ${p.outlineVariant}`,
+                background: p.surface,
+                color: p.onSurface,
+                fontSize: 14,
+                fontFamily: "inherit",
+                outline: "none",
+              }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={onCancel}
+                className="m3-press"
+                style={{
+                  height: 40,
+                  padding: "0 16px",
+                  borderRadius: 20,
+                  border: "none",
+                  background: "transparent",
+                  color: p.primary,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {t("cancel", lang)}
+              </button>
+              <button
+                type="button"
+                disabled={!val.trim()}
+                onClick={() => {
+                  if (val.trim()) onConfirm(val.trim());
+                }}
+                className="m3-press"
+                style={{
+                  height: 40,
+                  padding: "0 16px",
+                  borderRadius: 20,
+                  border: "none",
+                  background: p.primary,
+                  color: p.onPrimary,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: val.trim() ? "pointer" : "not-allowed",
+                  opacity: val.trim() ? 1 : 0.5,
+                }}
+              >
+                {confirmLabel ?? t("save", lang)}
+              </button>
             </div>
           </motion.div>
         </motion.div>

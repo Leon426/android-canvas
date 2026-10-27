@@ -485,6 +485,24 @@ export const UI = {
     en: "Could not connect. Check the URL, the network and the server's CORS settings",
     zh: "无法连接。请检查 URL、网络和服务器的 CORS 设置",
   },
+  // component library & packages
+  componentLibrary: { ja: "コンポーネント", en: "Component library", zh: "组件库" },
+  officialPackage: { ja: "公式コンポーネント", en: "Official components", zh: "官方组件包" },
+  createPackage: { ja: "パッケージを作成", en: "New component package", zh: "新建组件包" },
+  emptyPackage: { ja: "このパッケージにはまだコンポーネントがありません", en: "This package has no custom components yet", zh: "这个组件包还没有自定义组件" },
+  emptyPackageHint: { ja: "キャンバス上の部品を選択し、右側から保存します。", en: "Select a part on the canvas, then save it from the inspector.", zh: "在画布中选中组件，然后使用右侧的“另存为组件”。" },
+  packageName: { ja: "パッケージ名", en: "Package name", zh: "组件包名称" },
+  newPackageName: { ja: "パッケージの新しい名前", en: "New package name", zh: "组件包新名称" },
+  packageActions: { ja: "パッケージの操作", en: "Package actions", zh: "组件包操作" },
+  componentCount: { ja: "個のコンポーネント", en: "components", zh: "个组件" },
+  customPackageDefault: { ja: "カスタムパッケージ", en: "Custom package", zh: "自定义组件包" },
+  saveAsComponent: { ja: "コンポーネントとして保存", en: "Save as component", zh: "另存为组件" },
+  updateComponent: { ja: "コンポーネントを更新", en: "Update component", zh: "更新组件" },
+  detachComponent: { ja: "切り離す", en: "Detach", zh: "脱离组件" },
+  componentName: { ja: "コンポーネント名", en: "Component name", zh: "组件名称" },
+  save: { ja: "保存", en: "Save", zh: "保存" },
+  rename: { ja: "名前を変更", en: "Rename", zh: "重命名" },
+  create: { ja: "作成", en: "Create", zh: "创建" },
 } as const satisfies Record<string, Str>;
 
 export type UIKey = keyof typeof UI;
@@ -566,6 +584,23 @@ export const KO: Record<UIKey, string> = {
   aiSelectScreen: "먼저 화면을 선택하세요", aiNoKey: "AI 탭에 키를 입력하면 사용할 수 있습니다", aiError: "AI 요청에 실패했습니다",
   aiErrorRefusal: "모델이 답변을 거부했습니다", aiErrorJson: "모델의 응답을 읽을 수 없습니다", aiErrorLong: "답변이 너무 길어 중간에 잘렸습니다. 화면 수를 줄여 다시 시도하세요", aiErrorModel: "모델 ID를 입력하세요",
   aiErrorInsecure: "기본 URL은 https를 사용하거나 localhost를 가리켜야 합니다", aiErrorNetwork: "연결할 수 없습니다. URL, 네트워크 및 서버의 CORS 설정을 확인하세요",
+  componentLibrary: "컴포넌트 라이브러리",
+  officialPackage: "공식 컴포넌트",
+  createPackage: "패키지 만들기",
+  emptyPackage: "이 패키지에는 아직 컴포넌트가 없습니다",
+  emptyPackageHint: "캔버스에서 부품을 선택한 뒤 오른쪽에서 저장하세요.",
+  packageName: "패키지 이름",
+  newPackageName: "새 패키지 이름",
+  packageActions: "패키지 작업",
+  componentCount: "개 컴포넌트",
+  customPackageDefault: "사용자 정의 패키지",
+  saveAsComponent: "컴포넌트로 저장",
+  updateComponent: "컴포넌트 업데이트",
+  detachComponent: "연결 해제",
+  componentName: "컴포넌트 이름",
+  save: "저장",
+  rename: "이름 변경",
+  create: "만들기",
 };
 
 /** the locale each language writes its dates in */

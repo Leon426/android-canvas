@@ -199,7 +199,7 @@ export function ColorPanel({
   const cur = custom ?? schemeFromSeed(seed);
 
   return (
-    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 12px 20px" }}>
+    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
         <SettingRow p={p} icon={theme.dark ? "dark_mode" : "light_mode"} label={t("brightness", lang)} onClick={() => onTheme({ dark: !theme.dark })} pressed={theme.dark}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 13, fontWeight: 600, color: p.primary }}>

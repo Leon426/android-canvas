@@ -63,7 +63,7 @@ export function BottomSheet({ p, onClose, children }: { p: Palette; onClose: () 
       >
         <span style={{ width: 32, height: 4, borderRadius: 2, background: p.outlineVariant }} />
       </button>
-      <div className="no-scrollbar" style={{ overflowY: "auto", padding: "0 14px 16px", minHeight: 0 }}>
+      <div className="no-scrollbar" style={{ overflowY: "auto", padding: "0 8px 16px 14px", minHeight: 0 }}>
         {children}
       </div>
     </motion.div>

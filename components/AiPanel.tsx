@@ -169,7 +169,7 @@ export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiS
     onSettings({ ...settings, provider: k, baseUrl: s.baseUrl, model: s.model });
   };
   return (
-    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 12px 20px" }}>
+    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px" }}>
       <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: p.onSurfaceVariant, padding: "8px 6px 12px" }}>{t("aiSettings", lang)}</div>
       <div style={{ padding: "0 4px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

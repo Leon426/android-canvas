@@ -305,7 +305,7 @@ export function LayersPanel({
           />
         </div>
       )}
-      <div className="no-scrollbar" style={{ flex: 1, overflowY: "auto", padding: "8px 10px 12px" }}>
+      <div className="no-scrollbar" style={{ flex: 1, overflowY: "auto", padding: "8px 4px 12px 10px" }}>
         {topFirst.length === 0 ? (
           <div style={{ padding: 24, textAlign: "center", color: p.outline, fontSize: 12 }}>
             <Icon name="layers_clear" size={32} />

@@ -4,7 +4,7 @@ import type { ComponentLibrary } from "@/lib/componentLibrary";
 import { OFFICIAL_PACKAGE_ID } from "@/lib/componentLibrary";
 import type { Palette } from "@/lib/tokens";
 import { Icon } from "./M3Node";
-import { useLang } from "@/lib/i18n";
+import { t, useLang } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -73,40 +73,58 @@ export function ComponentLibraryPanel({ library, palette: p, onActive, onCreate,
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [rename, setRename] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const copy = lang === "zh"
-    ? { official: "官方组件包", create: "新建组件包", empty: "这个组件包还没有自定义组件", hint: "在画布中选中组件，然后使用右侧的“另存为组件”。", name: "组件包名称" }
-    : lang === "ja"
-      ? { official: "公式コンポーネント", create: "パッケージを作成", empty: "このパッケージにはまだコンポーネントがありません", hint: "キャンバス上の部品を選択し、右側から保存します。", name: "パッケージ名" }
-      : lang === "ko"
-        ? { official: "공식 컴포넌트", create: "패키지 만들기", empty: "이 패키지에는 아직 컴포넌트가 없습니다", hint: "캔버스에서 부품을 선택한 뒤 오른쪽에서 저장하세요.", name: "패키지 이름" }
-        : { official: "Official components", create: "New component package", empty: "This package has no custom components yet", hint: "Select a part on the canvas, then save it from the inspector.", name: "Package name" };
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuId) return;
+    const away = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuId(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuId(null);
+    };
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("keydown", escape, true);
+    };
+  }, [menuId]);
   const active = library.packages.find((pack) => pack.id === library.activePackageId);
   const buttonStyle = { border: "none", borderRadius: 18, minHeight: 38, padding: "8px 12px", font: "inherit", cursor: "pointer" } as const;
 
+  const deleteConfirmText = (packName: string) =>
+    lang === "zh"
+      ? `删除“${packName}”？画布实例会保留外观并脱离组件包。`
+      : lang === "ja"
+        ? `「${packName}」を削除しますか？キャンバスの部品は外見を保ったまま切り離されます。`
+        : lang === "ko"
+          ? `“${packName}”을(를) 삭제하시겠습니까? 캔버스의 부품은 모양을 유지한 채 연결이 해제됩니다.`
+          : `Delete “${packName}”? Canvas instances will keep their appearance and detach.`;
+
   return (
-    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "10px 14px 20px", color: p.onSurface }}>
-      <ComponentPackagePicker library={library} palette={p} value={library.activePackageId} onChange={onActive} label={copy.official} />
+    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "10px 8px 20px 14px", color: p.onSurface }}>
+      <ComponentPackagePicker library={library} palette={p} value={library.activePackageId} onChange={onActive} label={t("officialPackage", lang)} />
 
       {creating ? (
         <div style={{ marginTop: 12, padding: 10, borderRadius: 14, background: p.surfaceContainerLow, display: "grid", gap: 8 }}>
-          <input autoFocus value={name} aria-label={copy.name} placeholder={copy.name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => {
+          <input autoFocus value={name} aria-label={t("packageName", lang)} placeholder={t("packageName", lang)} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => {
             if (event.key === "Enter" && name.trim()) { onCreate(name.trim()); setName(""); setCreating(false); }
             if (event.key === "Escape") { setName(""); setCreating(false); }
           }} style={{ minHeight: 38, borderRadius: 10, padding: "0 10px", border: `1px solid ${p.outlineVariant}`, background: p.surface, color: p.onSurface }} />
           <div style={{ display: "flex", gap: 6 }}>
-            <button style={{ ...buttonStyle, flex: 1, background: p.surfaceContainerHigh, color: p.onSurface }} onClick={() => { setName(""); setCreating(false); }}>{lang === "zh" ? "取消" : "Cancel"}</button>
-            <button disabled={!name.trim()} style={{ ...buttonStyle, flex: 1, background: p.primary, color: p.onPrimary, opacity: name.trim() ? 1 : 0.5 }} onClick={() => { onCreate(name.trim()); setName(""); setCreating(false); }}>{lang === "zh" ? "创建" : "Create"}</button>
+            <button style={{ ...buttonStyle, flex: 1, background: p.surfaceContainerHigh, color: p.onSurface }} onClick={() => { setName(""); setCreating(false); }}>{t("cancel", lang)}</button>
+            <button disabled={!name.trim()} style={{ ...buttonStyle, flex: 1, background: p.primary, color: p.onPrimary, opacity: name.trim() ? 1 : 0.5 }} onClick={() => { onCreate(name.trim()); setName(""); setCreating(false); }}>{t("create", lang)}</button>
           </div>
         </div>
       ) : (
-        <button style={{ ...buttonStyle, width: "100%", marginTop: 12, background: p.primaryContainer, color: p.onPrimaryContainer, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} onClick={() => { setName(`自定义组件包 ${library.packages.length + 1}`); setCreating(true); }}>
-          <Icon name="create_new_folder" size={19} /> {copy.create}
+        <button style={{ ...buttonStyle, width: "100%", marginTop: 12, background: p.primaryContainer, color: p.onPrimaryContainer, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }} onClick={() => { setName(`${t("customPackageDefault", lang)} ${library.packages.length + 1}`); setCreating(true); }}>
+          <Icon name="create_new_folder" size={19} /> {t("createPackage", lang)}
         </button>
       )}
 
       <div style={{ marginTop: 18, display: "grid", gap: 8 }}>
         <div role="button" tabIndex={0} onClick={() => onActive(OFFICIAL_PACKAGE_ID)} style={{ padding: 12, borderRadius: 16, background: library.activePackageId === OFFICIAL_PACKAGE_ID ? p.secondaryContainer : p.surfaceContainerLow, color: library.activePackageId === OFFICIAL_PACKAGE_ID ? p.onSecondaryContainer : p.onSurface, cursor: "pointer" }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}><Icon name="verified" size={19} />{copy.official}</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}><Icon name="verified" size={19} />{t("officialPackage", lang)}</div>
           <div style={{ marginTop: 5, fontSize: 12, color: p.onSurfaceVariant }}>Material 3 / Material 3 Expressive</div>
         </div>
         {library.packages.map((pack) => {
@@ -117,34 +135,34 @@ export function ComponentLibraryPanel({ library, palette: p, onActive, onCreate,
             <div key={pack.id} style={{ borderRadius: 18, padding: 4, background: activePack ? p.primaryContainer : p.surfaceContainerLow, color: activePack ? p.onPrimaryContainer : p.onSurface }}>
               {editing ? (
                 <div style={{ padding: 8, display: "grid", gap: 8 }}>
-                  <input autoFocus aria-label={lang === "zh" ? "组件包新名称" : "New package name"} value={rename} onChange={(event) => setRename(event.target.value)} onKeyDown={(event) => {
+                  <input autoFocus aria-label={t("newPackageName", lang)} value={rename} onChange={(event) => setRename(event.target.value)} onKeyDown={(event) => {
                     if (event.key === "Enter" && rename.trim()) { onRename?.(pack.id, rename.trim()); setRenamingId(null); setMenuId(null); }
                     if (event.key === "Escape") setRenamingId(null);
                   }} style={{ minHeight: 38, borderRadius: 12, padding: "0 10px", border: `1px solid ${p.outlineVariant}`, background: p.surface, color: p.onSurface }} />
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button style={{ ...buttonStyle, flex: 1, background: "transparent", color: "inherit" }} onClick={() => setRenamingId(null)}>{lang === "zh" ? "取消" : "Cancel"}</button>
-                    <button disabled={!rename.trim()} style={{ ...buttonStyle, flex: 1, background: p.primary, color: p.onPrimary, opacity: rename.trim() ? 1 : 0.5 }} onClick={() => { onRename?.(pack.id, rename.trim()); setRenamingId(null); setMenuId(null); }}>{lang === "zh" ? "保存" : "Save"}</button>
+                    <button style={{ ...buttonStyle, flex: 1, background: "transparent", color: "inherit" }} onClick={() => setRenamingId(null)}>{t("cancel", lang)}</button>
+                    <button disabled={!rename.trim()} style={{ ...buttonStyle, flex: 1, background: p.primary, color: p.onPrimary, opacity: rename.trim() ? 1 : 0.5 }} onClick={() => { onRename?.(pack.id, rename.trim()); setRenamingId(null); setMenuId(null); }}>{t("save", lang)}</button>
                   </div>
                 </div>
               ) : deleting ? (
                 <div style={{ padding: 10 }}>
-                  <div style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 9 }}>{lang === "zh" ? `删除“${pack.name}”？画布实例会保留外观并脱离组件包。` : `Delete “${pack.name}”? Canvas instances will keep their appearance and detach.`}</div>
+                  <div style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 9 }}>{deleteConfirmText(pack.name)}</div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button style={{ ...buttonStyle, flex: 1, background: "transparent", color: "inherit" }} onClick={() => setDeletingId(null)}>{lang === "zh" ? "取消" : "Cancel"}</button>
-                    <button style={{ ...buttonStyle, flex: 1, background: p.errorContainer, color: p.onErrorContainer }} onClick={() => { onDelete?.(pack.id); setDeletingId(null); setMenuId(null); }}>{lang === "zh" ? "删除" : "Delete"}</button>
+                    <button style={{ ...buttonStyle, flex: 1, background: "transparent", color: "inherit" }} onClick={() => setDeletingId(null)}>{t("cancel", lang)}</button>
+                    <button style={{ ...buttonStyle, flex: 1, background: p.errorContainer, color: p.onErrorContainer }} onClick={() => { onDelete?.(pack.id); setDeletingId(null); setMenuId(null); }}>{t("delete", lang)}</button>
                   </div>
                 </div>
               ) : (
                 <div style={{ display: "flex", alignItems: "center" }}>
                   <button onClick={() => onActive(pack.id)} style={{ ...buttonStyle, flex: 1, textAlign: "left", borderRadius: 14, padding: 10, background: "transparent", color: "inherit" }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}><Icon name="deployed_code" size={19} />{pack.name}</div>
-                    <div style={{ marginTop: 5, fontSize: 12, opacity: 0.72 }}>{pack.definitions.length} {lang === "zh" ? "个组件" : "components"}</div>
+                    <div style={{ marginTop: 5, fontSize: 12, opacity: 0.72 }}>{pack.definitions.length} {t("componentCount", lang)}</div>
                   </button>
-                  <div style={{ position: "relative", alignSelf: "stretch", display: "grid", placeItems: "center" }}>
-                    <button aria-label={lang === "zh" ? "组件包操作" : "Package actions"} aria-expanded={menuId === pack.id} onClick={() => setMenuId((id) => id === pack.id ? null : pack.id)} style={{ width: 40, height: 40, borderRadius: 20, border: "none", background: menuId === pack.id ? p.secondaryContainer : "transparent", color: "inherit", cursor: "pointer", display: "grid", placeItems: "center" }}><Icon name="more_vert" size={20} /></button>
+                  <div ref={menuId === pack.id ? menuRef : undefined} style={{ position: "relative", alignSelf: "stretch", display: "grid", placeItems: "center" }}>
+                    <button aria-label={t("packageActions", lang)} aria-expanded={menuId === pack.id} onClick={() => setMenuId((id) => id === pack.id ? null : pack.id)} style={{ width: 40, height: 40, borderRadius: 20, border: "none", background: menuId === pack.id ? p.secondaryContainer : "transparent", color: "inherit", cursor: "pointer", display: "grid", placeItems: "center" }}><Icon name="more_vert" size={20} /></button>
                     {menuId === pack.id && <div style={{ position: "absolute", right: 0, top: 44, zIndex: 90, minWidth: 132, padding: 6, borderRadius: 18, background: p.surfaceContainer, color: p.onSurface, boxShadow: "0 6px 20px rgba(0,0,0,0.18)" }}>
-                      <button style={{ ...buttonStyle, width: "100%", background: "transparent", color: p.onSurface, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { setRename(pack.name); setRenamingId(pack.id); }}><Icon name="edit" size={18} />{lang === "zh" ? "重命名" : "Rename"}</button>
-                      <button style={{ ...buttonStyle, width: "100%", background: "transparent", color: p.error, display: "flex", alignItems: "center", gap: 8 }} onClick={() => setDeletingId(pack.id)}><Icon name="delete" size={18} />{lang === "zh" ? "删除" : "Delete"}</button>
+                      <button style={{ ...buttonStyle, width: "100%", background: "transparent", color: p.onSurface, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { setRename(pack.name); setRenamingId(pack.id); setMenuId(null); }}><Icon name="edit" size={18} />{t("rename", lang)}</button>
+                      <button style={{ ...buttonStyle, width: "100%", background: "transparent", color: p.error, display: "flex", alignItems: "center", gap: 8 }} onClick={() => { setDeletingId(pack.id); setMenuId(null); }}><Icon name="delete" size={18} />{t("delete", lang)}</button>
                     </div>}
                   </div>
                 </div>
@@ -162,7 +180,7 @@ export function ComponentLibraryPanel({ library, palette: p, onActive, onCreate,
               <div style={{ fontSize: 13, fontWeight: 650 }}>{definition.name}</div>
               <div style={{ fontSize: 11, color: p.onSurfaceVariant, marginTop: 3 }}>{definition.baseKind}</div>
             </div>
-          )) : <div style={{ padding: 14, borderRadius: 14, background: p.surfaceContainerLow, fontSize: 12, lineHeight: 1.5, color: p.onSurfaceVariant }}>{copy.empty}<br />{copy.hint}</div>}
+          )) : <div style={{ padding: 14, borderRadius: 14, background: p.surfaceContainerLow, fontSize: 12, lineHeight: 1.5, color: p.onSurfaceVariant }}>{t("emptyPackage", lang)}<br />{t("emptyPackageHint", lang)}</div>}
         </div>
       )}
     </div>

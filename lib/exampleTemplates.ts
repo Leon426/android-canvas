@@ -95,6 +95,7 @@ export function createLoginTemplateGroups(originX: number, originY: number): Gro
     id: uid(),
     label: "OR",
     size: 328,
+    fill: "inverseSurface",
   };
 
   // 7. Enter your email Outlined Button
@@ -115,6 +116,9 @@ export function createLoginTemplateGroups(originX: number, originY: number): Gro
     id: uid(),
     label: "By continuing, you agree to Anthropic's Consumer Terms and Usage Policy, and acknowledge their Privacy Policy.",
     size: 11,
+    size2: 320,
+    textAlign: "center",
+    textColor: "onSurfaceVariant",
   };
 
   return [

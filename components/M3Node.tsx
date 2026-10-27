@@ -417,19 +417,20 @@ function CheckboxContent({ item, p }: { item: Item; p: Palette }) {
 function TextContent({ item, p }: { item: Item; p: Palette }) {
   const w = useWeight();
   const fs = item.size ?? 28;
-  const isDisclaimer = (item.label?.length ?? 0) > 40;
+  const wrap = item.size2 !== undefined || item.textAlign !== undefined;
+  const align = item.textAlign === "start" ? "left" : item.textAlign === "end" ? "right" : item.textAlign === "center" ? "center" : undefined;
   return (
     <span
       style={{
         display: "inline-block",
         fontSize: fs,
-        lineHeight: isDisclaimer ? 1.45 : 1.3,
+        lineHeight: wrap ? 1.45 : 1.3,
         fontWeight: item.bold ? w(700, 800) : w(400, fs >= 22 ? 600 : 500),
         letterSpacing: fs >= 28 ? -0.25 : 0,
-        color: isDisclaimer ? p.outline : (item.textColor ? p[item.textColor] : (item.fill ? p[item.fill] : p.onSurface)),
-        whiteSpace: isDisclaimer ? "normal" : "nowrap",
-        textAlign: isDisclaimer ? "center" : undefined,
-        maxWidth: isDisclaimer ? 320 : undefined,
+        color: item.textColor ? p[item.textColor] : (item.fill ? p[item.fill] : p.onSurface),
+        whiteSpace: wrap ? "pre-wrap" : "nowrap",
+        textAlign: align,
+        maxWidth: item.size2 ?? (wrap ? 320 : undefined),
         padding: "0 2px",
       }}
     >
@@ -1413,8 +1414,8 @@ function Body({ item, p, tabScroll, menuShown }: { item: Item; p: Palette; tabSc
               style={{
                 position: "absolute",
                 padding: "0 8px",
-                background: p.inverseSurface,
-                color: p.outline,
+                background: item.fill ? p[item.fill] : p.surface,
+                color: item.textColor ? p[item.textColor] : p.outline,
                 fontSize: 11,
                 fontWeight: 700,
                 letterSpacing: 0.5,
