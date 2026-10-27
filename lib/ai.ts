@@ -156,13 +156,30 @@ export function updateProviderConfig(s: AiSettings, update: Partial<ProviderConf
   };
 }
 
-const isLocal = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(u.trim());
+/** A URL is "local" only when its parsed host really is this machine. URLs that
+ *  carry credentials (e.g. http://127.0.0.1:8080@evil.com) point elsewhere. */
+const isLocal = (u: string) => {
+  try {
+    const url = new URL(u.trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    if (url.username || url.password) return false;
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname === "::1";
+  } catch {
+    return false;
+  }
+};
 
 /** a hosted endpoint needs a key; a server on this machine may run without one */
 export const hasKey = (s: AiSettings) => s.key.trim().length > 0 || isLocal(s.baseUrl);
 
 /** the key must not travel over plain http, except to this machine */
-export const isSecureUrl = (u: string) => /^https:\/\//i.test(u.trim()) || isLocal(u);
+export const isSecureUrl = (u: string) => {
+  try {
+    return new URL(u.trim()).protocol === "https:" || isLocal(u);
+  } catch {
+    return false;
+  }
+};
 
 const trimSlash = (u: string) => u.trim().replace(/\/+$/, "");
 

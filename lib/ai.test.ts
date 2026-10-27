@@ -209,3 +209,23 @@ describe("per-provider configuration and switching", () => {
     expect(loaded.providers?.openai?.key).toBe("");
   });
 });
+
+describe("isSecureUrl", () => {
+  it("accepts an https endpoint", () => {
+    expect(isSecureUrl("https://api.example.test")).toBe(true);
+  });
+
+  it("accepts a server on this machine over http", () => {
+    expect(isSecureUrl("http://localhost:1234")).toBe(true);
+    expect(isSecureUrl("http://127.0.0.1:1234/v1")).toBe(true);
+    expect(isSecureUrl("http://[::1]:1234")).toBe(true);
+  });
+
+  it("rejects plain http to a remote host", () => {
+    expect(isSecureUrl("http://api.example.test")).toBe(false);
+  });
+
+  it("rejects a userinfo trick that only looks local", () => {
+    expect(isSecureUrl("http://127.0.0.1:8080@evil.example")).toBe(false);
+  });
+});

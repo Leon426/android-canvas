@@ -310,7 +310,7 @@ function GroupPanel({
       }
     >
       {onPlace && (
-        <Section id="group-align" icon="grid_on" title={t("align", lang)} p={p}>
+        <Section id="group-align" icon="grid_on" title={t("align", lang)} p={p} defaultOpen>
           <AlignBox key={selectionKey} onPlace={onPlace} p={p} />
         </Section>
       )}

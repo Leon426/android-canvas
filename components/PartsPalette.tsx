@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CATEGORIES, KIND_ORDER, KIND_SPEC, PALETTE_HIDDEN, Category, Kind, Palette } from "@/lib/tokens";
-import { KIND_TEXT, useLang } from "@/lib/i18n";
+import { KIND_TEXT, t, useLang } from "@/lib/i18n";
 import { Section, Tile } from "./ui";
 
 const CATEGORY_TEXT = {
@@ -90,7 +90,7 @@ export function PartsPalette({
         <Section
           id="cat:examples"
           icon="view_quilt"
-          title={lang === "zh" ? "示例" : lang === "ja" ? "サンプル" : lang === "ko" ? "예시" : "Examples"}
+          title={t("examples", lang)}
           p={p}
           m3Card
           open={openCat === "examples"}
@@ -100,7 +100,7 @@ export function PartsPalette({
             <Tile
               key="example:login"
               icon="smartphone"
-              label={lang === "zh" ? "登陆界面" : lang === "ja" ? "ログイン画面" : lang === "ko" ? "로그인 화면" : "Login screen"}
+              label={t("loginScreen", lang)}
               p={p}
               onPointerDown={(e) => onExamplePointerDown?.(e, "login")}
               onClick={() => onExampleActivate?.("login")}

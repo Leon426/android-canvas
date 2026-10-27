@@ -431,7 +431,7 @@ export function TriggerSection({
     set(k === "none" ? undefined : { to: k, transition });
   };
   return (
-    <Section id="part-action" icon="ads_click" title={t("tapTo", lang)} p={p}>
+    <Section id="part-action" icon="ads_click" title={t("tapTo", lang)} p={p} defaultOpen>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {head}
         <Select options={actionOptionsOf(item, frame, allFrames, lang)} value={action?.to ?? "none"} onChange={pick} p={p} label={t("tapTo", lang)} />

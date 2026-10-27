@@ -27,7 +27,7 @@ describe("AiPanel component", () => {
     expect(html).toContain("Gemini");
   });
 
-  it("renders with enabled save button when key is present", () => {
+  it("renders a masked saved-key chip when a key is present", () => {
     const onSettings = vi.fn();
     const settingsWithKey: AiSettings = {
       ...DEFAULT_AI,
@@ -37,7 +37,8 @@ describe("AiPanel component", () => {
       <AiPanel p={p} settings={settingsWithKey} onSettings={onSettings} />
     );
 
-    // The key input value has the secret key
-    expect(html).toContain('value="sk-my-secret-key"');
+    // The saved key is shown as a masked chip, not as an editable field
+    expect(html).toContain("sk-****");
+    expect(html).not.toContain('value="sk-my-secret-key"');
   });
 });

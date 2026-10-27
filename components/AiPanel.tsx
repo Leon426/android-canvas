@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Palette } from "@/lib/tokens";
+import { RADIUS } from "@/lib/design";
 import { t, useLang } from "@/lib/i18n";
 import { AiSettings, PROVIDERS, Provider, providerSpec, switchProvider, updateProviderConfig } from "@/lib/ai";
 import { Icon } from "./M3Node";
@@ -33,7 +34,7 @@ export function AiWriteBtn({ p, busy, disabled, onClick, onCancel, label, title 
       style={{
         height: 40,
         padding: "0 16px 0 12px",
-        borderRadius: 20,
+        borderRadius: RADIUS.pill,
         border: "none",
         background: disabled ? p.surfaceContainerHighest : p.primary,
         color: disabled ? p.onSurfaceVariant : p.onPrimary,
@@ -99,7 +100,7 @@ function Input({
           width: "100%",
           height: 44,
           padding: action ? "0 42px 0 14px" : "0 14px",
-          borderRadius: 22,
+          borderRadius: RADIUS.pill,
           border: `1.5px solid ${focused ? p.primary : p.outlineVariant}`,
           boxShadow: focused ? `0 0 0 1px ${p.primary}` : "none",
           background: p.surface,
@@ -201,29 +202,64 @@ function ProviderGroup({ value, onChange, p }: { value: Provider; onChange: (k: 
 }
 
 /** The AI tab of the left rail: the provider settings. The actions live with each screen on the right. */
-export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiSettings; onSettings: (s: AiSettings) => void }) {
+export function AiPanel({ p, settings, onSettings, onToast }: {
+  p: Palette;
+  settings: AiSettings;
+  onSettings: (s: AiSettings) => void;
+  onToast?: (msg: string, ms?: number, icon?: string) => void;
+}) {
   const lang = useLang();
   const spec = providerSpec(settings.provider);
 
   const [draftKey, setDraftKey] = useState(settings.key);
-  const [saved, setSaved] = useState(false);
   const [pasteFeedback, setPasteFeedback] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  /* a saved key shows as a masked chip; opening it arms a one-click delete */
+  const [editingKey, setEditingKey] = useState(settings.key.trim().length === 0);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const keyBox = useRef<HTMLDivElement>(null);
 
+  /* keep the draft in step with the provider we are looking at */
   useEffect(() => {
     setDraftKey(settings.key);
-    setSaved(false);
+    setEditingKey(settings.key.trim().length === 0);
+    setConfirmingDelete(false);
   }, [settings.provider, settings.key]);
 
+  /* an armed delete is cancelled by clicking elsewhere or pressing Escape */
+  useEffect(() => {
+    if (!confirmingDelete) return;
+    const away = (event: PointerEvent) => { if (!keyBox.current?.contains(event.target as Node)) setConfirmingDelete(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setConfirmingDelete(false); };
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", escape, true);
+    return () => { document.removeEventListener("pointerdown", away, true); document.removeEventListener("keydown", escape, true); };
+  }, [confirmingDelete]);
+
   const pick = (k: Provider) => {
-    onSettings(switchProvider(settings, k));
+    if (k === settings.provider) return;
+    /* switching away must not silently drop a key the author typed but did not save */
+    const draft = draftKey.trim();
+    const base = draft && draft !== settings.key.trim()
+      ? updateProviderConfig(settings, { key: draft })
+      : settings;
+    onSettings(switchProvider(base, k));
+    setShowKey(false);
   };
 
   const handleSave = () => {
     if (!draftKey.trim()) return;
     onSettings(updateProviderConfig(settings, { key: draftKey.trim() }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setEditingKey(false);
+    setConfirmingDelete(false);
+    onToast?.(t("saved", lang), 1600, "check");
+  };
+
+  const handleDelete = () => {
+    onSettings(updateProviderConfig(settings, { key: "" }));
+    setDraftKey("");
+    setEditingKey(true);
+    setConfirmingDelete(false);
   };
 
   const handlePaste = async () => {
@@ -232,7 +268,6 @@ export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiS
       if (text) {
         const trimmed = text.trim();
         setDraftKey(trimmed);
-        setSaved(false);
         setPasteFeedback(true);
         setTimeout(() => setPasteFeedback(false), 1200);
       }
@@ -240,6 +275,8 @@ export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiS
   };
 
   const canSave = draftKey.trim().length > 0;
+  const savedKey = settings.key.trim();
+  const maskedKey = savedKey.length > 3 ? `${savedKey.slice(0, 3)}****` : "****";
 
   return (
     <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px", display: "flex", flexDirection: "column" }}>
@@ -271,7 +308,7 @@ export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiS
                 p={p}
               />
             </div>
-            <div>
+            <div ref={keyBox}>
               <Label
                 p={p}
                 right={
@@ -284,98 +321,157 @@ export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiS
               >
                 {t("aiKey", lang)}
               </Label>
-              <Input
-                label={t("aiKey", lang)}
-                value={draftKey}
-                onChange={(val) => {
-                  setDraftKey(val);
-                  setSaved(false);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canSave) {
-                    e.preventDefault();
-                    handleSave();
-                  }
-                }}
-                placeholder="sk-…"
-                p={p}
-                type={showKey ? "text" : "password"}
-                action={
+              {savedKey && !editingKey ? (
+                confirmingDelete ? (
                   <button
                     type="button"
-                    onClick={() => setShowKey(!showKey)}
-                    title={showKey ? t("hideKey", lang) : t("showKey", lang)}
-                    aria-label={showKey ? t("hideKey", lang) : t("showKey", lang)}
+                    onClick={handleDelete}
+                    title={t("delete", lang)}
+                    aria-label={t("delete", lang)}
                     className="m3-press"
                     style={{
+                      width: "100%",
+                      minHeight: 44,
+                      borderRadius: RADIUS.pill,
                       border: "none",
-                      background: "transparent",
-                      color: p.onSurfaceVariant,
+                      background: p.errorContainer,
+                      color: p.onErrorContainer,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
                       cursor: "pointer",
-                      display: "grid",
-                      placeItems: "center",
-                      width: 28,
-                      height: 28,
-                      borderRadius: 14,
                     }}
                   >
-                    <Icon name={showKey ? "visibility_off" : "visibility"} size={18} />
+                    <Icon name="delete" size={18} />
+                    <span>{t("delete", lang)}</span>
                   </button>
-                }
-              />
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
-                {/* 快捷粘贴按钮：仅剪贴板图标，无文字，圆形色块按钮 */}
-                <button
-                  type="button"
-                  onClick={handlePaste}
-                  title={t("paste", lang)}
-                  aria-label={t("paste", lang)}
-                  className="m3-press"
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: "50%",
-                    border: "none",
-                    background: pasteFeedback ? p.primary : p.secondaryContainer,
-                    color: pasteFeedback ? p.onPrimary : p.onSecondaryContainer,
-                    display: "grid",
-                    placeItems: "center",
-                    cursor: "pointer",
-                    transition: "background 160ms, color 160ms, transform 120ms",
-                    flexShrink: 0,
-                  }}
-                >
-                  <Icon name={pasteFeedback ? "check" : "content_paste"} size={18} />
-                </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(true)}
+                    title={t("aiKey", lang)}
+                    aria-label={`${t("aiKey", lang)} ${maskedKey}`}
+                    className="m3-press"
+                    style={{
+                      width: "100%",
+                      minHeight: 44,
+                      borderRadius: RADIUS.pill,
+                      border: "none",
+                      background: p.surfaceContainerHighest,
+                      color: p.onSurfaceVariant,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "0 14px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    }}
+                  >
+                    <Icon name="key" size={18} />
+                    <span style={{ flex: 1, textAlign: "left" }}>{maskedKey}</span>
+                    <Icon name="delete" size={16} />
+                  </button>
+                )
+              ) : (
+                <>
+                  <Input
+                    label={t("aiKey", lang)}
+                    value={draftKey}
+                    onChange={(val) => {
+                      setDraftKey(val);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && canSave) {
+                        e.preventDefault();
+                        handleSave();
+                      }
+                    }}
+                    placeholder="sk-…"
+                    p={p}
+                    type={showKey ? "text" : "password"}
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        title={showKey ? t("hideKey", lang) : t("showKey", lang)}
+                        aria-label={showKey ? t("hideKey", lang) : t("showKey", lang)}
+                        className="m3-press"
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: p.onSurfaceVariant,
+                          cursor: "pointer",
+                          display: "grid",
+                          placeItems: "center",
+                          width: 28,
+                          height: 28,
+                          borderRadius: RADIUS.pill,
+                        }}
+                      >
+                        <Icon name={showKey ? "visibility_off" : "visibility"} size={18} />
+                      </button>
+                    }
+                  />
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                    {/* 快捷粘贴按钮：仅剪贴板图标，无文字，圆形色块按钮 */}
+                    <button
+                      type="button"
+                      onClick={handlePaste}
+                      title={t("paste", lang)}
+                      aria-label={t("paste", lang)}
+                      className="m3-press"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: RADIUS.pill,
+                        border: "none",
+                        background: pasteFeedback ? p.primary : p.secondaryContainer,
+                        color: pasteFeedback ? p.onPrimary : p.onSecondaryContainer,
+                        display: "grid",
+                        placeItems: "center",
+                        cursor: "pointer",
+                        transition: "background 160ms, color 160ms, transform 120ms",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Icon name={pasteFeedback ? "check" : "content_paste"} size={18} />
+                    </button>
 
-                {/* 保存按钮：未输入时灰色无法点击 */}
-                <button
-                  type="button"
-                  disabled={!canSave}
-                  onClick={handleSave}
-                  title={saved ? t("saved", lang) : t("save", lang)}
-                  className="m3-press"
-                  style={{
-                    height: 36,
-                    padding: "0 18px",
-                    borderRadius: 18,
-                    border: "none",
-                    background: !canSave ? p.surfaceContainerHighest : saved ? p.tertiaryContainer : p.primary,
-                    color: !canSave ? p.onSurfaceVariant : saved ? p.onTertiaryContainer : p.onPrimary,
-                    opacity: !canSave ? 0.5 : 1,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: !canSave ? "not-allowed" : "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    transition: "all 160ms",
-                  }}
-                >
-                  <Icon name={saved ? "check" : "save"} size={16} />
-                  <span>{saved ? t("saved", lang) : t("save", lang)}</span>
-                </button>
-              </div>
+                    {/* 保存按钮：未输入时灰色无法点击 */}
+                    <button
+                      type="button"
+                      disabled={!canSave}
+                      onClick={handleSave}
+                      title={t("save", lang)}
+                      className="m3-press"
+                      style={{
+                        height: 36,
+                        padding: "0 18px",
+                        borderRadius: RADIUS.pill,
+                        border: "none",
+                        background: !canSave ? p.surfaceContainerHighest : p.primary,
+                        color: !canSave ? p.onSurfaceVariant : p.onPrimary,
+                        opacity: !canSave ? 0.5 : 1,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: !canSave ? "not-allowed" : "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        transition: "all 160ms",
+                      }}
+                    >
+                      <Icon name="save" size={16} />
+                      <span>{t("save", lang)}</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
