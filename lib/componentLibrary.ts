@@ -57,21 +57,67 @@ export const OFFICIAL_PACKAGE_ID = "official";
 export const DEFAULT_CUSTOM_PACKAGE_ID = "custom-1";
 export const EMPTY_COMPONENT_LIBRARY: ComponentLibrary = { schemaVersion: 2, packages: [], activePackageId: OFFICIAL_PACKAGE_ID };
 
-export function normalizeComponentLibrary(value?: ComponentLibrary | ComponentLibraryV1): ComponentLibrary {
-  if (!value) return EMPTY_COMPONENT_LIBRARY;
-  if (value.schemaVersion === 2) return value;
-  return {
-    schemaVersion: 2,
-    activePackageId: value.definitions.length ? DEFAULT_CUSTOM_PACKAGE_ID : OFFICIAL_PACKAGE_ID,
-    packages: value.definitions.length ? [{ id: DEFAULT_CUSTOM_PACKAGE_ID, name: "自定义组件包 1", definitions: value.definitions }] : [],
-  };
+export function normalizeComponentLibrary(value?: ComponentLibrary | ComponentLibraryV1 | unknown, defaultPackageName = "Custom package 1"): ComponentLibrary {
+  if (!value || typeof value !== "object") return EMPTY_COMPONENT_LIBRARY;
+  const v = value as Record<string, unknown>;
+  if (v.schemaVersion === 2 && Array.isArray(v.packages) && typeof v.activePackageId === "string") {
+    return sanitizeComponentLibrary(value as ComponentLibrary);
+  }
+  if (v.schemaVersion === 1 && Array.isArray(v.definitions)) {
+    const defs = v.definitions as ComponentDefinition[];
+    return sanitizeComponentLibrary({
+      schemaVersion: 2,
+      activePackageId: defs.length ? DEFAULT_CUSTOM_PACKAGE_ID : OFFICIAL_PACKAGE_ID,
+      packages: defs.length ? [{ id: DEFAULT_CUSTOM_PACKAGE_ID, name: defaultPackageName, definitions: defs }] : [],
+    });
+  }
+  return EMPTY_COMPONENT_LIBRARY;
 }
 
 export const definitionsOf = (library?: ComponentLibrary | ComponentLibraryV1): ComponentDefinition[] => {
   if (!library) return [];
-  if (library.schemaVersion === 1) return library.definitions;
-  return library.packages.flatMap((pack) => pack.definitions);
+  if (library.schemaVersion === 1 && Array.isArray(library.definitions)) return library.definitions;
+  if (library.schemaVersion === 2 && Array.isArray(library.packages)) return library.packages.flatMap((pack) => pack.definitions ?? []);
+  return [];
 };
+
+/** Whether `extends` walks a same-package, same-kind, acyclic chain. */
+function isValidInheritance(definition: ComponentDefinition, byId: Map<string, ComponentDefinition>): boolean {
+  const seen = new Set<string>([definition.id]);
+  let cursor = byId.get(definition.extends ?? "");
+  while (cursor) {
+    if (seen.has(cursor.id) || cursor.baseKind !== definition.baseKind) return false;
+    seen.add(cursor.id);
+    if (!cursor.extends) return true;
+    cursor = byId.get(cursor.extends);
+  }
+  return false;
+}
+
+/**
+ * Bring a library up to the RFC's model invariants without rejecting the whole
+ * document: definition ids stay unique project-wide, and `extends` only points
+ * at a same-package, same-kind definition without cycles. Anything that would
+ * break those rules is stripped rather than making an older project unopenable.
+ */
+export function sanitizeComponentLibrary(library: ComponentLibrary): ComponentLibrary {
+  const seenIds = new Set<string>();
+  const packages = library.packages.map((pack) => {
+    const definitions = pack.definitions.filter((definition) => {
+      if (seenIds.has(definition.id)) return false;
+      seenIds.add(definition.id);
+      return true;
+    });
+    const byId = new Map(definitions.map((definition) => [definition.id, definition]));
+    return {
+      ...pack,
+      definitions: definitions.map((definition) =>
+        definition.extends && !isValidInheritance(definition, byId) ? { ...definition, extends: undefined } : definition,
+      ),
+    };
+  });
+  return { ...library, packages };
+}
 
 const STYLE_KEYS = new Set<keyof ComponentStyle>([
   "variant", "size", "size2", "radiusTop", "radiusBottom", "corners",
@@ -88,7 +134,21 @@ export function componentStyleOf(value: Partial<Item>): ComponentStyle {
   for (const key of STYLE_KEYS) {
     if (value[key] !== undefined) Object.assign(style, { [key]: value[key] });
   }
-  return style;
+  return definedStyle(style);
+}
+
+/** A style with `undefined` entries dropped and object values copied, so a
+ *  definition's corners are never shared by reference with a resolved item. */
+function definedStyle(style: ComponentStyle | undefined): ComponentStyle {
+  const out: ComponentStyle = {};
+  if (!style) return out;
+  for (const key of STYLE_KEYS) {
+    const value = style[key];
+    if (value === undefined) continue;
+    if (key === "corners" && typeof value === "object") Object.assign(out, { corners: { ...(value as Radii) } });
+    else Object.assign(out, { [key]: value });
+  }
+  return out;
 }
 
 export type ComponentResolution =
@@ -103,10 +163,19 @@ export function resolveComponentInstance(item: Item, library?: ComponentLibrary 
   const ref = item.component;
   if (!ref) return { ok: false, item, reason: "missing" };
 
-  const allDefinitions = library?.schemaVersion === 2 && ref.packageId
-    ? library.packages.find((pack) => pack.id === ref.packageId)?.definitions ?? []
-    : definitionsOf(library);
-  const definitions = new Map(allDefinitions.map((definition) => [definition.id, definition]));
+  /* resolution stays inside one package: a definition only inherits from its
+     own package, and an unqualified instance binds to the first package that
+     carries its id */
+  let packageDefinitions: ComponentDefinition[];
+  if (library?.schemaVersion === 2) {
+    const pack = ref.packageId
+      ? library.packages.find((candidate) => candidate.id === ref.packageId)
+      : library.packages.find((candidate) => candidate.definitions.some((definition) => definition.id === ref.definitionId));
+    packageDefinitions = pack?.definitions ?? [];
+  } else {
+    packageDefinitions = definitionsOf(library);
+  }
+  const definitions = new Map(packageDefinitions.map((definition) => [definition.id, definition]));
   const definition = definitions.get(ref.definitionId);
   if (!definition) return { ok: false, item, reason: "missing" };
   if (definition.baseKind !== item.kind) return { ok: false, item, reason: "kind" };
@@ -123,11 +192,11 @@ export function resolveComponentInstance(item: Item, library?: ComponentLibrary 
     if (chain[0].extends && !cursor) return { ok: false, item, reason: "missing" };
   }
 
-  const inherited = chain.reduce<ComponentStyle>((style, part) => ({ ...style, ...part.style }), {});
+  const inherited = chain.reduce<ComponentStyle>((style, part) => ({ ...style, ...definedStyle(part.style) }), {});
   return {
     ok: true,
     definition,
-    item: { ...item, ...inherited, ...(ref.overrides ?? {}), id: item.id, kind: item.kind, component: ref },
+    item: { ...item, ...inherited, ...definedStyle(ref.overrides), id: item.id, kind: item.kind, component: ref },
   };
 }
 

@@ -23,6 +23,10 @@ describe("isProject", () => {
     expect(isProject(value)).toBe(true);
   });
 
+  it("accepts documents with unknown future component library versions", () => {
+    expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 3, something: "future" } })).toBe(true);
+  });
+
   it("rejects malformed component libraries and instance overrides", () => {
     expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 2, definitions: [] } })).toBe(false);
     expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 1, definitions: [
@@ -243,6 +247,15 @@ describe("readProject", () => {
 
   it("returns null for valid JSON with an invalid nested item", async () => {
     await expect(readProject(new File([JSON.stringify(withItem({ kind: "unknown" }))], "bad.json"))).resolves.toBeNull();
+  });
+
+  it("ignores unknown component library versions and preserves groups and frames", async () => {
+    const value = { ...doc(), componentLibrary: { schemaVersion: 3, futurePayload: { test: true } } };
+    const result = await readProject(new File([JSON.stringify(value)], "future.json"));
+    expect(result).not.toBeNull();
+    expect(result?.componentLibrary).toBeUndefined();
+    expect(result?.groups).toEqual(value.groups);
+    expect(result?.frames).toEqual(value.frames);
   });
 
   it("returns null when reading the File fails", async () => {

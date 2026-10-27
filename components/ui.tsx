@@ -1408,21 +1408,7 @@ export function Toggle({
   );
 }
 
-/** Collapsible section; collapsed state is remembered per key. */
-export function Section({
-  id,
-  icon,
-  title,
-  p,
-  children,
-  right,
-  open: controlledOpen,
-  defaultOpen = true,
-  onToggle,
-  m3Card = false,
-  card = !m3Card,
-  collapsible = m3Card || !defaultOpen,
-}: {
+export type SectionProps = {
   id: string;
   icon: string;
   title: string;
@@ -1439,38 +1425,64 @@ export function Section({
   card?: boolean;
   /** whether the section can be collapsed/expanded */
   collapsible?: boolean;
+};
+
+export function StaticCardSection({
+  icon,
+  title,
+  p,
+  children,
+  right,
+}: {
+  icon: string;
+  title: string;
+  p: Palette;
+  children: React.ReactNode;
+  right?: React.ReactNode;
 }) {
-  if (card && !collapsible) {
-    return (
+  return (
+    <div
+      style={{
+        marginBottom: 10,
+        borderRadius: 18,
+        background: p.surfaceContainerLow,
+        padding: "12px 14px 14px",
+      }}
+    >
       <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minHeight: 28,
           marginBottom: 10,
-          borderRadius: 18,
-          background: p.surfaceContainerLow,
-          padding: "12px 14px 14px",
+          color: p.onSurface,
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: 0.4,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            minHeight: 28,
-            marginBottom: 10,
-            color: p.onSurface,
-            fontSize: 13,
-            fontWeight: 700,
-            letterSpacing: 0.4,
-          }}
-        >
-          <Icon name={icon} size={18} />
-          <span style={{ flex: 1 }}>{title}</span>
-          {right}
-        </div>
-        <div>{children}</div>
+        <Icon name={icon} size={18} />
+        <span style={{ flex: 1 }}>{title}</span>
+        {right}
       </div>
-    );
-  }
+      <div>{children}</div>
+    </div>
+  );
+}
+
+export function CollapsibleSection({
+  id,
+  icon,
+  title,
+  p,
+  children,
+  right,
+  open: controlledOpen,
+  defaultOpen = false,
+  onToggle,
+  m3Card = false,
+}: SectionProps) {
   const [internalOpen, setInternalOpen] = useState(() => {
     if (controlledOpen !== undefined) return controlledOpen;
     if (typeof window !== "undefined") {
@@ -1500,41 +1512,40 @@ export function Section({
     }
     onToggle?.(next);
   };
-  return (
-    <div style={{ marginBottom: m3Card ? 8 : 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, height: m3Card ? 48 : 36 }}>
-        <button
-          onClick={toggle}
-          aria-expanded={open}
-          style={{
-            flex: 1,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            height: m3Card ? 48 : 36,
-            padding: m3Card ? "0 14px" : "0 6px",
-            border: "none",
-            background: m3Card ? (open ? p.secondaryContainer : p.surfaceContainerLow) : "transparent",
-            color: m3Card && open ? p.onSecondaryContainer : p.onSurfaceVariant,
-            cursor: "pointer",
-            borderRadius: m3Card ? 18 : 12,
-            fontSize: m3Card ? 13 : 12,
-            fontWeight: 700,
-            letterSpacing: 0.4,
-            textAlign: "left",
-          }}
-        >
-          <Icon name={icon} size={18} />
-          <span style={{ flex: 1 }}>{title}</span>
-          {m3Card ? (
+  /* palette/category navigation: a filled M3 list-item header, no surrounding card */
+  if (m3Card) {
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, height: 48 }}>
+          <button
+            onClick={toggle}
+            aria-expanded={open}
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              height: 48,
+              padding: "0 14px",
+              border: "none",
+              background: open ? p.secondaryContainer : p.surfaceContainerLow,
+              color: open ? p.onSecondaryContainer : p.onSurfaceVariant,
+              cursor: "pointer",
+              borderRadius: 18,
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textAlign: "left",
+            }}
+          >
+            <Icon name={icon} size={18} />
+            <span style={{ flex: 1 }}>{title}</span>
             <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.2, ease: [0.2, 0, 0, 1] }} style={{ display: "inline-flex" }}>
               <Icon name="expand_more" size={18} />
             </motion.span>
-          ) : <Icon name={open ? "expand_less" : "expand_more"} size={18} />}
-        </button>
-        {right}
-      </div>
-      {m3Card ? (
+          </button>
+          {right}
+        </div>
         <AnimatePresence initial={false}>
           {open && (
             <motion.div
@@ -1549,9 +1560,55 @@ export function Section({
             </motion.div>
           )}
         </AnimatePresence>
-      ) : open && <div style={{ padding: "6px 4px 14px" }}>{children}</div>}
+      </div>
+    );
+  }
+  /* settings panels: the previous card container, now with a click-to-collapse header */
+  return (
+    <div style={{ marginBottom: 10, borderRadius: 18, background: p.surfaceContainerLow, padding: "12px 14px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button
+          onClick={toggle}
+          aria-expanded={open}
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            minHeight: 28,
+            padding: 0,
+            border: "none",
+            background: "transparent",
+            color: p.onSurface,
+            cursor: "pointer",
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: 0.4,
+            textAlign: "left",
+          }}
+        >
+          <Icon name={icon} size={18} />
+          <span style={{ flex: 1 }}>{title}</span>
+          <Icon name={open ? "expand_less" : "expand_more"} size={18} />
+        </button>
+        {right}
+      </div>
+      {open && <div style={{ paddingTop: 10 }}>{children}</div>}
     </div>
   );
+}
+
+/** Collapsible section; collapsed state is remembered per key. */
+export function Section({
+  collapsible = true,
+  card,
+  ...rest
+}: SectionProps) {
+  const isCard = card ?? !rest.m3Card;
+  if (isCard && !collapsible) {
+    return <StaticCardSection {...rest} />;
+  }
+  return <CollapsibleSection {...rest} />;
 }
 
 export function Tile({

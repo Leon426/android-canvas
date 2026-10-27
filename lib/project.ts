@@ -41,7 +41,10 @@ const validDefinitions = (value: unknown) => Array.isArray(value) && value.every
     (definition.extends === undefined || typeof definition.extends === "string") && validStyle(definition.style)) &&
   new Set(value.map((definition) => definition.id)).size === value.length;
 
+const isKnownVersion = (v: number) => v === 1 || v === 2;
+
 const validComponentLibrary = (value: unknown): value is ComponentLibrary | ComponentLibraryV1 => value === undefined || (isRecord(value) && (
+  (typeof value.schemaVersion === "number" && !isKnownVersion(value.schemaVersion)) ||
   (value.schemaVersion === 1 && validDefinitions(value.definitions)) ||
   (value.schemaVersion === 2 && typeof value.activePackageId === "string" && Array.isArray(value.packages) &&
     value.packages.every((pack) => isRecord(pack) && typeof pack.id === "string" && pack.id.length > 0 && typeof pack.name === "string" && validDefinitions(pack.definitions)) &&
@@ -130,7 +133,11 @@ export function saveProject(doc: Doc) {
 export async function readProject(file: File): Promise<Doc | null> {
   try {
     const next: unknown = JSON.parse(await file.text());
-    return isProject(next) ? next : null;
+    if (!isProject(next)) return null;
+    if (next.componentLibrary && typeof next.componentLibrary.schemaVersion === "number" && !isKnownVersion(next.componentLibrary.schemaVersion)) {
+      delete next.componentLibrary;
+    }
+    return next;
   } catch {
     return null;
   }

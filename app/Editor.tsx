@@ -544,9 +544,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const leftW = RAIL_W + 244;
   const [leftTab, setLeftTab] = useState<LeftTab>("parts");
   const titleMeasureRef = useRef<HTMLSpanElement>(null);
-  const tabTitle = leftTab === "library"
-    ? (lang === "zh" ? "组件库" : lang === "ja" ? "コンポーネント" : lang === "ko" ? "컴포넌트" : "Component library")
-    : t(LEFT_TABS.find((x) => x.key === leftTab)?.title ?? "parts", lang);
+  const tabTitle = t(LEFT_TABS.find((x) => x.key === leftTab)?.title ?? "parts", lang);
   const [pillWidth, setPillWidth] = useState<number>(() => (leftTab === "library" ? 64 : 50));
   useEffect(() => {
     if (titleMeasureRef.current) {
@@ -600,6 +598,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const pendingRef = useRef<{ timer: number; commit: () => void } | null>(null);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  const resolvedGroupsRef = useRef<Group[]>(groups);
   const framesRef = useRef(frames);
   framesRef.current = frames;
   const widthsRef = useRef(widths);
@@ -781,7 +780,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     else if (reset) setPromptEdit(undefined);
     if (Array.isArray(doc.promptOptions)) setPromptOptions(doc.promptOptions);
     else if (reset) setPromptOptions(undefined);
-    if (doc.componentLibrary) setComponentLibrary(normalizeComponentLibrary(doc.componentLibrary));
+    if (doc.componentLibrary) setComponentLibrary(normalizeComponentLibrary(doc.componentLibrary, `${t("customPackageDefault", lang)} 1`));
     else if (reset) setComponentLibrary(EMPTY_COMPONENT_LIBRARY);
     if (isPlatform(doc.platform)) setPlatform(doc.platform);
     else if (reset) setPlatform(null);
@@ -1492,7 +1491,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const item: Item = {
       ...makeItem("box"),
       id: uid(),
-      label: lang === "zh" ? "登陆界面" : "Login screen",
+      label: t("loginScreen", lang),
       size: 160,
       size2: 240,
       radiusTop: 16,
@@ -1695,7 +1694,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const d = sizeDragSpec(item, side, frameOfGroup(g, framesRef.current, widthsRef.current) ?? null);
     const v = clamp(Math.round(d.startV / 4) * 4 + dir * 4, d.min, d.max);
     if (v === d.startV) return;
-    patchSelected(sizePatch(item, d, v));
+    patchSelectedInstance(sizePatch(item, d, v));
   };
   /* a drag that outlives the editor leaves nothing listening behind it */
   const widthDragEnd = useRef<(() => void) | null>(null);
@@ -1759,7 +1758,25 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             ? gr
             : {
                 ...gr,
-                items: gr.items.map((it) => (it.id !== d.id ? it : { ...it, ...sizePatch(it, d, v) })),
+                items: gr.items.map((it) => {
+                  if (it.id !== d.id) return it;
+                  const patch = sizePatch(it, d, v);
+                  if (it.component) {
+                    const stylePatch: Record<string, unknown> = {};
+                    for (const [k, val] of Object.entries(patch)) {
+                      if (isComponentStyleKey(k)) stylePatch[k] = val;
+                    }
+                    return {
+                      ...it,
+                      ...patch,
+                      component: {
+                        ...it.component,
+                        overrides: { ...(it.component.overrides ?? {}), ...stylePatch },
+                      },
+                    };
+                  }
+                  return { ...it, ...patch };
+                }),
               },
         ),
       );
@@ -1970,7 +1987,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             const nextX = nextFrameX();
             const newF: Frame = {
               id: uid(),
-              name: lang === "zh" ? "登陆界面" : "Login screen",
+              name: t("loginScreen", lang),
               x: nextX,
               y: framesRef.current[0]?.y ?? 0,
               bg: "inverseSurface",
@@ -1980,7 +1997,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             return newF;
           })();
         patchFrame(targetFrame.id, {
-          name: targetFrame.name === t("home", lang) ? (lang === "zh" ? "登陆界面" : "Login screen") : targetFrame.name,
+          name: targetFrame.name === t("home", lang) ? t("loginScreen", lang) : targetFrame.name,
           bg: "inverseSurface",
         });
         if (frameRef.current !== "phone") {
@@ -2067,7 +2084,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const itemRects = useCallback(() => {
     const out: { id: string; l: number; t: number; r: number; b: number }[] =
       [];
-    for (const g of groupsRef.current) {
+    for (const g of resolvedGroupsRef.current) {
       for (const pl of layoutOf(g, widthsRef.current)) {
         out.push({ id: pl.item.id, l: pl.x, t: pl.y, r: pl.x + pl.w, b: pl.y + pl.h });
       }
@@ -2375,11 +2392,15 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const instancePatch: Partial<Item> = {};
     const stylePatch: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(patch)) {
-      if (isComponentStyleKey(key)) stylePatch[key] = value;
-      else Object.assign(instancePatch, { [key]: value });
+      if (isComponentStyleKey(key)) {
+        /* an undefined style value must fall back to the definition, not shadow it */
+        if (value !== undefined) stylePatch[key] = value;
+      } else {
+        Object.assign(instancePatch, { [key]: value });
+      }
     }
     patchSelected({
-      ...instancePatch,
+      ...patch,
       component: {
         ...selected.component,
         overrides: { ...(selected.component.overrides ?? {}), ...stylePatch },
@@ -3001,7 +3022,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
       const nextX = nextFrameX();
       const newF: Frame = {
         id: uid(),
-        name: lang === "zh" ? "登陆界面" : "Login screen",
+        name: t("loginScreen", lang),
         x: nextX,
         y: framesRef.current[0]?.y ?? 0,
         bg: "inverseSurface",
@@ -3011,7 +3032,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
       targetFrame = newF;
     } else {
       patchFrame(targetFrame.id, {
-        name: targetFrame.name === t("home", lang) ? (lang === "zh" ? "登陆界面" : "Login screen") : targetFrame.name,
+        name: targetFrame.name === t("home", lang) ? t("loginScreen", lang) : targetFrame.name,
         bg: "inverseSurface",
       });
     }
@@ -3397,7 +3418,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   /** the runs of one screen drawn with plain divs: the export layer */
   const displayItem = (item: Item) => resolveComponentInstance(item, componentLibrary).item;
   const renderExport = (f: Frame) => {
-    const gs = groups.filter((g) => frameOfGroup(g, frames, widths)?.id === f.id);
+    const gs = resolvedGroups.filter((g) => frameOfGroup(g, frames, widths)?.id === f.id);
     const { w } = frameSizeOf(f);
     const h = frameLengthOf(f);
     return (
@@ -3417,7 +3438,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             layoutOf(g, widths).map((pl) => (
               <div key={pl.item.id} style={{ position: "absolute", left: pl.x - f.x, top: pl.y - f.y, zIndex: modalRailOf(g) ? 2 : undefined }}>
                 <M3Static
-                  item={displayItem(pl.item)}
+                  item={pl.item}
                   palette={p}
                   radii={corners.get(pl.item.id)}
                   style={MEASURED.includes(pl.item.kind) ? undefined : { width: pl.w, height: pl.h }}
@@ -3450,7 +3471,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
               return (
                 <M3Static
                   key={it.id}
-                  item={displayItem(it)}
+                  item={it}
                   palette={p}
                   radii={radii}
                   style={MEASURED.includes(it.kind) ? undefined : { width: sizeOf(it, widths).w, height: sizeOf(it, widths).h }}
@@ -3734,6 +3755,8 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     [groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme, componentLibrary],
   );
   const resolvedDoc = useMemo(() => resolveDocumentComponents(doc), [doc]);
+  const resolvedGroups = resolvedDoc.groups;
+  resolvedGroupsRef.current = resolvedGroups;
   /** the same document, for callbacks that were created on an earlier render */
   const docRef = useRef(doc);
   docRef.current = doc;
@@ -3841,12 +3864,12 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const frameOf = useMemo(() => {
     const m = new Map<string, string>();
     if (frame !== "phone") return m;
-    for (const g of groups) {
+    for (const g of resolvedGroups) {
       const f = frameOfGroup(g, frames, widths);
       if (f) m.set(g.id, f.id);
     }
     return m;
-  }, [groups, frames, frame, widths]);
+  }, [resolvedGroups, frames, frame, widths]);
 
   /** the screen whose layers the panel lists: the selection's, else the chosen one */
   const layersFrame = useMemo(() => {
@@ -3860,8 +3883,8 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     return frames.find((f) => f.id === layersFrameId) ?? frames[0] ?? null;
   }, [frame, primaryId, groups, frameOf, frames, selectedFrameId, layersFrameId]);
   const layerGroups = useMemo(
-    () => (layersFrame ? groups.filter((g) => frameOf.get(g.id) === layersFrame.id) : []),
-    [groups, frameOf, layersFrame],
+    () => (layersFrame ? resolvedGroups.filter((g) => frameOf.get(g.id) === layersFrame.id) : []),
+    [resolvedGroups, frameOf, layersFrame],
   );
   /** A drag in the layers panel is one undo step: the snapshot is taken when it starts,
    *  and the reorders it fires along the way record nothing more. */
@@ -3944,7 +3967,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
           {layoutOf(g, widths).map((pl) => (
             <div key={pl.item.id} style={{ position: "absolute", left: pl.x - g.x, top: pl.y - g.y }}>
               <M3Node
-                item={displayItem(pl.item)}
+                item={pl.item}
                 palette={p}
                 widths={widths}
                 radii={corners.get(pl.item.id)}
@@ -4091,7 +4114,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
           return (
             <M3Node
               key={c.item.id}
-              item={menuPart && c.item.id === menuPart.id ? { ...onLook(displayItem(c.item)), [menuUp]: rises } : onLook(displayItem(c.item))}
+              item={menuPart && c.item.id === menuPart.id ? { ...onLook(c.item), [menuUp]: rises } : onLook(c.item)}
               palette={p}
               widths={widths}
               radii={radii}
@@ -4255,9 +4278,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             lit={dragLit}
             dragging
             radii={(() => {
-              const conn = connectSpecOf(drag.item);
-              if (!conn || !drag.snap) return baseRadii(drag.item);
-              const g = groupsRef.current.find(
+              const dragResolved = displayItem(drag.item);
+              const conn = connectSpecOf(dragResolved);
+              if (!conn || !drag.snap) return baseRadii(dragResolved);
+              const g = resolvedGroupsRef.current.find(
                 (x) => x.id === drag.snap!.groupId,
               );
               const mm = (g?.items.length ?? 0) + 1;
@@ -4499,6 +4523,42 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                         packages: library.packages.filter((pack) => pack.id !== id),
                       }));
                     }}
+                    onRenameDefinition={(packageId, definitionId, name) => {
+                      snapshot(true);
+                      setComponentLibrary((library) => ({
+                        ...library,
+                        packages: library.packages.map((pack) => pack.id !== packageId ? pack : {
+                          ...pack,
+                          definitions: pack.definitions.map((definition) => definition.id === definitionId ? { ...definition, name } : definition),
+                        }),
+                      }));
+                    }}
+                    onDeleteDefinition={(packageId, definitionId) => {
+                      snapshot(true);
+                      /* canvas instances keep their appearance but lose the definition link */
+                      setGroups((current) => current.map((group) => ({
+                        ...group,
+                        items: group.items.map((item) => {
+                          const ref = item.component;
+                          if (!ref || ref.definitionId !== definitionId) return item;
+                          /* an unqualified reference belongs to the package being cleaned up */
+                          if (ref.packageId && ref.packageId !== packageId) return item;
+                          const resolved = resolveComponentInstance(item, componentLibrary).item;
+                          const { component: _component, ...detached } = resolved;
+                          return detached;
+                        }),
+                      })));
+                      setComponentLibrary((library) => ({
+                        ...library,
+                        packages: library.packages.map((pack) => pack.id !== packageId ? pack : {
+                          ...pack,
+                          definitions: pack.definitions
+                            .filter((definition) => definition.id !== definitionId)
+                            /* inheritance pointing at the removed definition would dangle */
+                            .map((definition) => definition.extends === definitionId ? { ...definition, extends: undefined } : definition),
+                        }),
+                      }));
+                    }}
                   />
                 ) : leftTab === "color" ? (
                   <ColorPanel
@@ -4519,7 +4579,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 ) : leftTab === "motion" ? (
                   <MotionPanel p={p} theme={theme} onChange={patchTheme} />
                 ) : leftTab === "ai" ? (
-                  <AiPanel p={p} settings={aiSettings} onSettings={updateAiSettings} />
+                  <AiPanel p={p} settings={aiSettings} onSettings={updateAiSettings} onToast={showToast} />
                 ) : (
                   <LayersPanel
                     p={p}
@@ -4669,10 +4729,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                             transition: lengthDragId === f.id ? undefined : SIZE_TRANSITION,
                           }}
                         >
-                          {groups
+                          {resolvedGroups
                             .filter((g) => frameOf.get(g.id) === f.id)
                             .map((g) => renderGroup(g, f.x, f.y))}
-                          {groups.some((g) => frameOf.get(g.id) === f.id && modalRailOf(g)) && (
+                          {resolvedGroups.some((g) => frameOf.get(g.id) === f.id && modalRailOf(g)) && (
                             <div aria-hidden style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)", pointerEvents: "none", zIndex: 1 }} />
                           )}
                           {/* where the device ends on a screen that runs further: below it, the body scrolls */}
@@ -4719,7 +4779,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   );
                 })}
 
-              {groups
+              {resolvedGroups
                 .filter((g) => !frameOf.has(g.id))
                 .map((g) => renderGroup(g, 0, 0))}
 
@@ -4728,7 +4788,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   and whatever sits opposite stays where it is */}
               {/* a FAB showing its menu is being edited as a menu, not sized as a button */}
               {!handMode && !drag && selectedIds.length === 1 && selected && selected.id !== menuId && HANDLED.has(selected.kind) && (() => {
-                const g = groups.find((x) => x.items.length === 1 && !x.free && !x.locked && x.items[0].id === selected.id);
+                const g = resolvedGroups.find((x) => x.items.length === 1 && !x.free && !x.locked && x.items[0].id === selected.id);
                 if (!g) return null;
                 const b = groupBounds(g, widths);
                 /* the same offset the group is drawn with while its left or top edge is being dragged */
@@ -4741,17 +4801,17 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                     key={selected.id}
                     /* one measure, so the part is held by the points around it rather than by
                      * its edges: a circle's diameter, a label's height */
-                    round={ROUND.has(selected.kind)}
+                    round={ROUND.has((selectedResolved ?? selected).kind)}
                     /* a bar and a slider have a width and nothing else: they are held by their two
                      * ends; a carousel is the other way about and is held by its top and bottom */
-                    sides={WIDE.has(selected.kind) ? BAR_SIDES : TALL.has(selected.kind) ? TALL_SIDES : undefined}
+                    sides={WIDE.has((selectedResolved ?? selected).kind) ? BAR_SIDES : TALL.has((selectedResolved ?? selected).kind) ? TALL_SIDES : undefined}
                     /* a part with a height of its own is held by all four edges; one whose height follows its kind by its two ends */
                     box={{ l: b.l + sx, t: b.t + sy, r: b.r + sx, b: b.b + sy }}
                     z={view.z}
                     instant={widthDragId === selected.id || sizeEditId === selected.id}
                     p={p}
-                    onDown={(e, side) => onWidthHandleDown(e, g, selected, side)}
-                    onNudge={(side, dir) => nudgeSize(g, selected, side, dir)}
+                    onDown={(e, side) => onWidthHandleDown(e, g, selectedResolved ?? selected, side)}
+                    onNudge={(side, dir) => nudgeSize(g, selectedResolved ?? selected, side, dir)}
                   />
                 );
               })()}
@@ -5028,9 +5088,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             {isMobile && sheet === "edit" && selected && (
               <BottomSheet key="edit" p={p} onClose={() => setSheet(null)}>
                 <MobileInspector
-                  item={selected}
+                  item={selectedResolved ?? selected}
                   palette={p}
-                  onChange={patchSelected}
+                  onChange={patchSelectedInstance}
                   onDelete={() => {
                     deleteSelected();
                     setSheet(null);
