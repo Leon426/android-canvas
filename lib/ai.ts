@@ -10,11 +10,18 @@ import { Lang } from "./i18n";
 
 export type Provider = "claude" | "openai" | "gemini" | "deepseek";
 
+export type ProviderConfig = {
+  baseUrl: string;
+  model: string;
+  key: string;
+};
+
 export type AiSettings = {
   provider: Provider;
   baseUrl: string;
   model: string;
   key: string;
+  providers?: Partial<Record<Provider, ProviderConfig>>;
 };
 
 export const PROVIDERS: { key: Provider; label: string; baseUrl: string; model: string; keysUrl?: string }[] = [
@@ -26,20 +33,64 @@ export const PROVIDERS: { key: Provider; label: string; baseUrl: string; model: 
 
 export const providerSpec = (k: Provider) => PROVIDERS.find((p) => p.key === k) ?? PROVIDERS[0];
 
-export const DEFAULT_AI: AiSettings = { provider: PROVIDERS[0].key, baseUrl: PROVIDERS[0].baseUrl, model: PROVIDERS[0].model, key: "" };
+const defaultProvidersConfig = (): Record<Provider, ProviderConfig> => ({
+  openai: { baseUrl: PROVIDERS[0].baseUrl, model: PROVIDERS[0].model, key: "" },
+  claude: { baseUrl: PROVIDERS[1].baseUrl, model: PROVIDERS[1].model, key: "" },
+  gemini: { baseUrl: PROVIDERS[2].baseUrl, model: PROVIDERS[2].model, key: "" },
+  deepseek: { baseUrl: PROVIDERS[3].baseUrl, model: PROVIDERS[3].model, key: "" },
+});
+
+export const DEFAULT_AI: AiSettings = {
+  provider: PROVIDERS[0].key,
+  baseUrl: PROVIDERS[0].baseUrl,
+  model: PROVIDERS[0].model,
+  key: "",
+  providers: defaultProvidersConfig(),
+};
 
 const STORE_KEY = "m3e:ai";
 
 export function loadAiSettings(): AiSettings {
-  const s = { ...DEFAULT_AI };
+  const providers = defaultProvidersConfig();
+  const s: AiSettings = {
+    ...DEFAULT_AI,
+    providers,
+  };
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) {
-      const v = JSON.parse(raw) as Partial<AiSettings>;
+      const v = JSON.parse(raw) as Partial<AiSettings> & { keys?: Partial<Record<Provider, string>> };
       if (PROVIDERS.some((p) => p.key === v.provider)) s.provider = v.provider as Provider;
-      if (typeof v.baseUrl === "string") s.baseUrl = v.baseUrl;
-      if (typeof v.model === "string") s.model = v.model;
-      if (typeof v.key === "string") s.key = v.key;
+
+      if (v.providers && typeof v.providers === "object") {
+        for (const p of PROVIDERS) {
+          const stored = v.providers[p.key];
+          if (stored) {
+            providers[p.key] = {
+              baseUrl: typeof stored.baseUrl === "string" ? stored.baseUrl : p.baseUrl,
+              model: typeof stored.model === "string" ? stored.model : p.model,
+              key: typeof stored.key === "string" ? stored.key : "",
+            };
+          }
+        }
+      }
+
+      // Legacy fallback: if old single key existed
+      const current = providers[s.provider] || providers[PROVIDERS[0].key];
+      if (typeof v.key === "string" && v.key && !current.key) {
+        current.key = v.key;
+      }
+      if (typeof v.baseUrl === "string" && v.baseUrl) {
+        current.baseUrl = v.baseUrl;
+      }
+      if (typeof v.model === "string" && v.model) {
+        current.model = v.model;
+      }
+
+      s.baseUrl = current.baseUrl;
+      s.model = current.model;
+      s.key = current.key;
+      s.providers = providers;
     }
   } catch {}
   return s;
@@ -48,8 +99,61 @@ export function loadAiSettings(): AiSettings {
 /** Settings live in this browser only, like the document itself. */
 export function saveAiSettings(s: AiSettings) {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(s));
+    const providers: Partial<Record<Provider, ProviderConfig>> = { ...(s.providers || defaultProvidersConfig()) };
+    providers[s.provider] = {
+      baseUrl: s.baseUrl,
+      model: s.model,
+      key: s.key,
+    };
+    const toSave: AiSettings = {
+      ...s,
+      providers,
+    };
+    localStorage.setItem(STORE_KEY, JSON.stringify(toSave));
   } catch {}
+}
+
+/** Switch active provider while preserving each provider's independent configuration and key */
+export function switchProvider(s: AiSettings, next: Provider): AiSettings {
+  const current = s.provider;
+  const providers: Partial<Record<Provider, ProviderConfig>> = { ...(s.providers || defaultProvidersConfig()) };
+  providers[current] = {
+    baseUrl: s.baseUrl,
+    model: s.model,
+    key: s.key,
+  };
+  const spec = providerSpec(next);
+  const nextConfig = providers[next] || { baseUrl: spec.baseUrl, model: spec.model, key: "" };
+  providers[next] = nextConfig;
+
+  return {
+    ...s,
+    provider: next,
+    baseUrl: nextConfig.baseUrl,
+    model: nextConfig.model,
+    key: nextConfig.key,
+    providers,
+  };
+}
+
+/** Update the current active provider's configuration and synchronize with providers dictionary */
+export function updateProviderConfig(s: AiSettings, update: Partial<ProviderConfig>): AiSettings {
+  const nextBaseUrl = update.baseUrl !== undefined ? update.baseUrl : s.baseUrl;
+  const nextModel = update.model !== undefined ? update.model : s.model;
+  const nextKey = update.key !== undefined ? update.key : s.key;
+  const providers: Partial<Record<Provider, ProviderConfig>> = { ...(s.providers || defaultProvidersConfig()) };
+  providers[s.provider] = {
+    baseUrl: nextBaseUrl,
+    model: nextModel,
+    key: nextKey,
+  };
+  return {
+    ...s,
+    baseUrl: nextBaseUrl,
+    model: nextModel,
+    key: nextKey,
+    providers,
+  };
 }
 
 const isLocal = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(u.trim());

@@ -503,6 +503,10 @@ export const UI = {
   save: { ja: "保存", en: "Save", zh: "保存" },
   rename: { ja: "名前を変更", en: "Rename", zh: "重命名" },
   create: { ja: "作成", en: "Create", zh: "创建" },
+  paste: { ja: "貼り付け", en: "Paste", zh: "粘贴" },
+  saved: { ja: "保存済み", en: "Saved", zh: "已保存" },
+  showKey: { ja: "キーを表示", en: "Show key", zh: "显示密钥" },
+  hideKey: { ja: "キーを隠す", en: "Hide key", zh: "隐藏密钥" },
 } as const satisfies Record<string, Str>;
 
 export type UIKey = keyof typeof UI;
@@ -601,6 +605,10 @@ export const KO: Record<UIKey, string> = {
   save: "저장",
   rename: "이름 변경",
   create: "만들기",
+  paste: "붙여넣기",
+  saved: "저장됨",
+  showKey: "키 보기",
+  hideKey: "키 숨기기",
 };
 
 /** the locale each language writes its dates in */

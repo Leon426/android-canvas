@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { complete, hasKey, isSecureUrl, type AiSettings, type Provider } from "./ai";
+import { complete, DEFAULT_AI, hasKey, isSecureUrl, loadAiSettings, saveAiSettings, switchProvider, updateProviderConfig, type AiSettings, type Provider } from "./ai";
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings =>
   ({ provider: "openai", baseUrl: "https://api.example.test", model: "test-model", key: "test-key", ...over });
@@ -132,5 +132,80 @@ describe("hasKey and isSecureUrl", () => {
     expect(isSecureUrl("http://127.0.0.1:8080/v1")).toBe(true);
     expect(isSecureUrl("http://[::1]:8080/v1")).toBe(true);
     expect(isSecureUrl("http://api.example.test/v1")).toBe(false);
+  });
+});
+
+describe("per-provider configuration and switching", () => {
+  it("keeps keys and configurations strictly isolated between providers", () => {
+    let s = { ...DEFAULT_AI };
+
+    // Set DeepSeek key and custom model
+    s = switchProvider(s, "deepseek");
+    expect(s.provider).toBe("deepseek");
+    expect(s.key).toBe("");
+
+    s = updateProviderConfig(s, { key: "sk-deepseek-xyz", model: "deepseek-chat" });
+    expect(s.key).toBe("sk-deepseek-xyz");
+    expect(s.model).toBe("deepseek-chat");
+
+    // Switch to Claude - key must NOT be shared or carried over
+    s = switchProvider(s, "claude");
+    expect(s.provider).toBe("claude");
+    expect(s.key).toBe("");
+    expect(s.model).not.toBe("deepseek-chat");
+
+    // Set Claude key
+    s = updateProviderConfig(s, { key: "sk-ant-claude-999" });
+    expect(s.key).toBe("sk-ant-claude-999");
+
+    // Switch back to DeepSeek - original key and model must be restored
+    s = switchProvider(s, "deepseek");
+    expect(s.provider).toBe("deepseek");
+    expect(s.key).toBe("sk-deepseek-xyz");
+    expect(s.model).toBe("deepseek-chat");
+
+    // Switch back to Claude - Claude key must be intact
+    s = switchProvider(s, "claude");
+    expect(s.provider).toBe("claude");
+    expect(s.key).toBe("sk-ant-claude-999");
+  });
+
+  it("persists and restores per-provider configuration in localStorage", () => {
+    const store: Record<string, string> = {};
+    const mockStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v; },
+      removeItem: (k: string) => { delete store[k]; },
+    };
+    vi.stubGlobal("localStorage", mockStorage);
+
+    let s = { ...DEFAULT_AI };
+    s = switchProvider(s, "deepseek");
+    s = updateProviderConfig(s, { key: "ds-secret-key" });
+    saveAiSettings(s);
+
+    const loaded = loadAiSettings();
+    expect(loaded.provider).toBe("deepseek");
+    expect(loaded.key).toBe("ds-secret-key");
+    expect(loaded.providers?.deepseek?.key).toBe("ds-secret-key");
+    expect(loaded.providers?.claude?.key).toBe("");
+  });
+
+  it("handles legacy localStorage format gracefully", () => {
+    const mockStorage = {
+      getItem: () => JSON.stringify({ provider: "deepseek", key: "legacy-key", model: "legacy-model", baseUrl: "https://legacy.url" }),
+      setItem: () => {},
+      removeItem: () => {},
+    };
+    vi.stubGlobal("localStorage", mockStorage);
+
+    const loaded = loadAiSettings();
+    expect(loaded.provider).toBe("deepseek");
+    expect(loaded.key).toBe("legacy-key");
+    expect(loaded.model).toBe("legacy-model");
+    expect(loaded.baseUrl).toBe("https://legacy.url");
+    // Ensure other providers are initialized with their defaults and empty keys
+    expect(loaded.providers?.claude?.key).toBe("");
+    expect(loaded.providers?.openai?.key).toBe("");
   });
 });

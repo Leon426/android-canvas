@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Palette } from "@/lib/tokens";
 import { t, useLang } from "@/lib/i18n";
-import { AiSettings, PROVIDERS, Provider, providerSpec } from "@/lib/ai";
+import { AiSettings, PROVIDERS, Provider, providerSpec, switchProvider, updateProviderConfig } from "@/lib/ai";
 import { Icon } from "./M3Node";
 
 /** the message shown for a failed request, mapped from the error codes lib/ai throws */
@@ -62,22 +62,62 @@ export function AiWriteBtn({ p, busy, disabled, onClick, onCancel, label, title 
 
 const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 
-const field = (p: Palette): React.CSSProperties => ({
-  width: "100%",
-  height: 44,
-  padding: "0 14px",
-  borderRadius: 22,
-  border: `1px solid ${p.outlineVariant}`,
-  background: p.surface,
-  color: p.onSurface,
-  fontSize: 13,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  outline: "none",
-  boxSizing: "border-box",
-});
-
-function Input({ value, onChange, placeholder, p, type = "text", label }: { value: string; onChange: (v: string) => void; placeholder?: string; p: Palette; type?: string; label: string }) {
-  return <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={label} spellCheck={false} autoComplete="off" style={field(p)} />;
+function Input({
+  value,
+  onChange,
+  placeholder,
+  p,
+  type = "text",
+  label,
+  action,
+  onKeyDown,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  p: Palette;
+  type?: string;
+  label: string;
+  action?: React.ReactNode;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        aria-label={label}
+        spellCheck={false}
+        autoComplete="off"
+        style={{
+          width: "100%",
+          height: 44,
+          padding: action ? "0 42px 0 14px" : "0 14px",
+          borderRadius: 22,
+          border: `1.5px solid ${focused ? p.primary : p.outlineVariant}`,
+          boxShadow: focused ? `0 0 0 1px ${p.primary}` : "none",
+          background: p.surface,
+          color: p.onSurface,
+          fontSize: 13,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          outline: "none",
+          boxSizing: "border-box",
+          transition: "border-color 160ms cubic-bezier(0.2, 0, 0, 1), box-shadow 160ms cubic-bezier(0.2, 0, 0, 1)",
+        }}
+      />
+      {action && (
+        <div style={{ position: "absolute", right: 8, top: 0, bottom: 0, display: "grid", placeItems: "center" }}>
+          {action}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const Label = ({ children, p, right }: { children: React.ReactNode; p: Palette; right?: React.ReactNode }) => (
@@ -164,44 +204,189 @@ function ProviderGroup({ value, onChange, p }: { value: Provider; onChange: (k: 
 export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiSettings; onSettings: (s: AiSettings) => void }) {
   const lang = useLang();
   const spec = providerSpec(settings.provider);
+
+  const [draftKey, setDraftKey] = useState(settings.key);
+  const [saved, setSaved] = useState(false);
+  const [pasteFeedback, setPasteFeedback] = useState(false);
+  const [showKey, setShowKey] = useState(false);
+
+  useEffect(() => {
+    setDraftKey(settings.key);
+    setSaved(false);
+  }, [settings.provider, settings.key]);
+
   const pick = (k: Provider) => {
-    const s = providerSpec(k);
-    onSettings({ ...settings, provider: k, baseUrl: s.baseUrl, model: s.model });
+    onSettings(switchProvider(settings, k));
   };
+
+  const handleSave = () => {
+    if (!draftKey.trim()) return;
+    onSettings(updateProviderConfig(settings, { key: draftKey.trim() }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        const trimmed = text.trim();
+        setDraftKey(trimmed);
+        setSaved(false);
+        setPasteFeedback(true);
+        setTimeout(() => setPasteFeedback(false), 1200);
+      }
+    } catch {}
+  };
+
+  const canSave = draftKey.trim().length > 0;
+
   return (
-    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px" }}>
-      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: p.onSurfaceVariant, padding: "8px 6px 12px" }}>{t("aiSettings", lang)}</div>
-      <div style={{ padding: "0 4px" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div>
-            <Label p={p}>{t("aiProvider", lang)}</Label>
-            <ProviderGroup value={settings.provider} onChange={pick} p={p} />
-          </div>
-          <div>
-            <Label p={p}>{t("aiModel", lang)}</Label>
-            <Input label={t("aiModel", lang)} value={settings.model} onChange={(model) => onSettings({ ...settings, model })} placeholder={spec.model || "model"} p={p} />
-          </div>
-          <div>
-            <Label p={p}>{t("aiBaseUrl", lang)}</Label>
-            <Input label={t("aiBaseUrl", lang)} value={settings.baseUrl} onChange={(baseUrl) => onSettings({ ...settings, baseUrl })} placeholder={spec.baseUrl} p={p} />
-          </div>
-          <div>
-            <Label
-              p={p}
-              right={
-                spec.keysUrl && (
-                  <a href={spec.keysUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 600, color: p.primary }}>
-                    {t("aiGetKey", lang)}
-                  </a>
-                )
-              }
-            >
-              {t("aiKey", lang)}
-            </Label>
-            <Input label={t("aiKey", lang)} value={settings.key} onChange={(key) => onSettings({ ...settings, key })} placeholder="sk-…" p={p} type="password" />
-            <div style={{ fontSize: 12, lineHeight: 1.5, color: p.onSurfaceVariant, marginTop: 8, padding: "0 4px" }}>{t("aiKeyHint", lang)}</div>
+    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: p.onSurfaceVariant, padding: "8px 6px 12px" }}>{t("aiSettings", lang)}</div>
+        <div style={{ padding: "0 4px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <Label p={p}>{t("aiProvider", lang)}</Label>
+              <ProviderGroup value={settings.provider} onChange={pick} p={p} />
+            </div>
+            <div>
+              <Label p={p}>{t("aiModel", lang)}</Label>
+              <Input
+                label={t("aiModel", lang)}
+                value={settings.model}
+                onChange={(model) => onSettings(updateProviderConfig(settings, { model }))}
+                placeholder={spec.model || "model"}
+                p={p}
+              />
+            </div>
+            <div>
+              <Label p={p}>{t("aiBaseUrl", lang)}</Label>
+              <Input
+                label={t("aiBaseUrl", lang)}
+                value={settings.baseUrl}
+                onChange={(baseUrl) => onSettings(updateProviderConfig(settings, { baseUrl }))}
+                placeholder={spec.baseUrl}
+                p={p}
+              />
+            </div>
+            <div>
+              <Label
+                p={p}
+                right={
+                  spec.keysUrl && (
+                    <a href={spec.keysUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, fontWeight: 600, color: p.primary }}>
+                      {t("aiGetKey", lang)}
+                    </a>
+                  )
+                }
+              >
+                {t("aiKey", lang)}
+              </Label>
+              <Input
+                label={t("aiKey", lang)}
+                value={draftKey}
+                onChange={(val) => {
+                  setDraftKey(val);
+                  setSaved(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canSave) {
+                    e.preventDefault();
+                    handleSave();
+                  }
+                }}
+                placeholder="sk-…"
+                p={p}
+                type={showKey ? "text" : "password"}
+                action={
+                  <button
+                    type="button"
+                    onClick={() => setShowKey(!showKey)}
+                    title={showKey ? t("hideKey", lang) : t("showKey", lang)}
+                    aria-label={showKey ? t("hideKey", lang) : t("showKey", lang)}
+                    className="m3-press"
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: p.onSurfaceVariant,
+                      cursor: "pointer",
+                      display: "grid",
+                      placeItems: "center",
+                      width: 28,
+                      height: 28,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <Icon name={showKey ? "visibility_off" : "visibility"} size={18} />
+                  </button>
+                }
+              />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                {/* 快捷粘贴按钮：仅剪贴板图标，无文字，圆形色块按钮 */}
+                <button
+                  type="button"
+                  onClick={handlePaste}
+                  title={t("paste", lang)}
+                  aria-label={t("paste", lang)}
+                  className="m3-press"
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: "50%",
+                    border: "none",
+                    background: pasteFeedback ? p.primary : p.secondaryContainer,
+                    color: pasteFeedback ? p.onPrimary : p.onSecondaryContainer,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    transition: "background 160ms, color 160ms, transform 120ms",
+                    flexShrink: 0,
+                  }}
+                >
+                  <Icon name={pasteFeedback ? "check" : "content_paste"} size={18} />
+                </button>
+
+                {/* 保存按钮：未输入时灰色无法点击 */}
+                <button
+                  type="button"
+                  disabled={!canSave}
+                  onClick={handleSave}
+                  title={saved ? t("saved", lang) : t("save", lang)}
+                  className="m3-press"
+                  style={{
+                    height: 36,
+                    padding: "0 18px",
+                    borderRadius: 18,
+                    border: "none",
+                    background: !canSave ? p.surfaceContainerHighest : saved ? p.tertiaryContainer : p.primary,
+                    color: !canSave ? p.onSurfaceVariant : saved ? p.onTertiaryContainer : p.onPrimary,
+                    opacity: !canSave ? 0.5 : 1,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: !canSave ? "not-allowed" : "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    transition: "all 160ms",
+                  }}
+                >
+                  <Icon name={saved ? "check" : "save"} size={16} />
+                  <span>{saved ? t("saved", lang) : t("save", lang)}</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* 提示文案置于底部 */}
+      <div style={{ marginTop: "auto", paddingTop: 28, paddingBottom: 6, display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, lineHeight: 1.5, color: p.onSurfaceVariant }}>
+        <span style={{ color: p.primary, flexShrink: 0, marginTop: 1 }}>
+          <Icon name="lock" size={16} />
+        </span>
+        <span>{t("aiKeyHint", lang)}</span>
       </div>
     </div>
   );
