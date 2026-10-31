@@ -132,7 +132,7 @@ import { downloadAgentBundle } from "@/lib/agentBundle";
 import { DOC_KEY } from "@/lib/localDoc";
 import { isProject, readProject, saveProject } from "@/lib/project";
 import { useComponentLibraryActions } from "@/app/editor/useComponentLibraryActions";
-import { BEFORE_KEY, useDocumentPersistence } from "@/app/editor/useDocumentPersistence";
+import { BEFORE_KEY, UI_KEY, useDocumentPersistence } from "@/app/editor/useDocumentPersistence";
 import { useEditorHistory } from "@/app/editor/useEditorHistory";
 import type { Snapshot } from "@/app/editor/types";
 import { hasShareHash, readShareHash } from "@/lib/share";
@@ -630,8 +630,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const instantRef = useRef<Set<string>>(new Set());
   const initialLangRef = useRef<Lang>(initialLang);
   const interruptPreviewRef = useRef<() => void>(() => {});
-  /* fit / doc refs are assigned once their implementations exist further down */
+  /* fit / doc / ensureFrame refs are assigned once their implementations exist further down */
   const fitRef = useRef<(animate?: boolean) => void>(() => {});
+  const ensureFrameRef = useRef<() => void>(() => {});
   const docRef = useRef<Doc>(null!);
 
   const { applyDoc, loadedRef, hadDocRef } = useDocumentPersistence(
@@ -759,6 +760,122 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     document.fonts?.ready.then(refreshWidths);
     document.fonts?.addEventListener("loadingdone", refreshWidths);
     return () => document.fonts?.removeEventListener("loadingdone", refreshWidths);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    /* the editor's own text and the parts both pick up the language's Noto face */
+    document.body.style.fontFamily = uiFontFamily(lang);
+    ensureLangFontLoaded(lang, () => setWidths({}));
+  }, [lang]);
+
+  useEffect(() => {
+    /* an empty width map makes every measured part read its width again in the new face */
+    ensureFontLoaded(theme.font, () => setWidths({}));
+  }, [theme.font]);
+
+  /* the page background outside the app root follows the scheme, so dark mode has no white edges */
+  useEffect(() => {
+    document.body.style.background = p.surface;
+    document.body.style.color = p.onSurface;
+  }, [p.surface, p.onSurface]);
+
+  /* in-app browsers size the page behind their own toolbars and may ignore dvh,
+     so the measured inner height wins over the CSS height (innerHeight, not the
+     visual viewport, so pinch-zoom and the keyboard leave the layout alone) */
+  useEffect(() => {
+    const apply = () => {
+      const h = Math.round(window.innerHeight);
+      if (h > 0) document.documentElement.style.setProperty("--app-h", `${h}px`);
+    };
+    /* in-app browsers (X, Instagram, LINE...) keep their own action bar over the
+       page bottom, so the controls sit one button higher there. App names in the
+       user agent are unreliable; the embedded web view itself is not: iOS web
+       views omit the Safari token and Android ones carry "wv" */
+    const ua = navigator.userAgent;
+    const iosWebView = /iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua);
+    const androidWebView = /Android/.test(ua) && /(?:^|\W)wv(?:\W|$)/.test(ua);
+    if (iosWebView || androidWebView || /Twitter|Instagram|FBAN|FBAV|Line\//i.test(ua)) {
+      document.documentElement.style.setProperty("--bottom-ui", "64px");
+    }
+    apply();
+    window.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", apply);
+    };
+  }, []);
+
+  /* everyone works on phone screens; a phone gets one fixed screen and the select tool only.
+     This effect also reveals the canvas after the first fit — without setViewReady the
+     world stays visibility:hidden forever. */
+  useEffect(() => {
+    const mqFine = window.matchMedia("(pointer: fine)");
+    const mqCoarse = window.matchMedia("(pointer: coarse)");
+    let prevW = window.innerWidth;
+
+    // Initial check on mount: if on desktop in split-screen (< 960px) and no explicit saved UI, collapse right sidebar
+    if (mqFine.matches && window.innerWidth < 960) {
+      try {
+        const u = localStorage.getItem(UI_KEY);
+        if (!u || typeof JSON.parse(u)?.rightOpen !== "boolean") {
+          setRightOpen(false);
+        }
+      } catch {}
+    }
+
+    const computeIsMobile = () => {
+      const isFine = mqFine.matches;
+      // For desktop (mouse/trackpad): do not treat as mobile even when split-screen (e.g. 640px~960px).
+      // Only treat as mobile if window is extremely narrow (< 640px).
+      if (isFine) {
+        return window.innerWidth < 640;
+      }
+      // For touch-only devices: mobile breakpoint lowered to 640px (phones) or coarse pointer <= 768px.
+      return window.innerWidth < 640 || (mqCoarse.matches && window.innerWidth <= 768);
+    };
+
+    const apply = () => {
+      const w = window.innerWidth;
+      // Auto-collapse right panel if desktop window is resized below 960px to preserve canvas room
+      if (mqFine.matches && w < 960 && prevW >= 960) {
+        setRightOpen(false);
+      }
+      prevW = w;
+
+      const m = computeIsMobile();
+      setIsMobile(m);
+      mobileRef.current = m;
+      if (m) {
+        setMode("select");
+        setSheet(null);
+        if (!hadDocRef.current) {
+          hadDocRef.current = true;
+          setGroups(mobileSeed(initialLangRef.current));
+          setFrames([{ id: uid(), name: t("home", initialLangRef.current), x: 0, y: 0 }]);
+        }
+      }
+      hadDocRef.current = true;
+      if (frameRef.current !== "phone") {
+        setFrame("phone");
+        frameRef.current = "phone";
+      }
+      ensureFrameRef.current();
+      queueMicrotask(() => {
+        fitRef.current();
+        setViewReady(true);
+      });
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    mqFine.addEventListener("change", apply);
+    mqCoarse.addEventListener("change", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      mqFine.removeEventListener("change", apply);
+      mqCoarse.removeEventListener("change", apply);
+    };
   }, []);
 
   const sizeRef = useCallback((it: Item) => sizeOf(it, widthsRef.current), []);
@@ -2712,7 +2829,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     setFrames([f]);
   };
 
-  const ensureFrameRef = useRef(() => {});
   ensureFrameRef.current = ensureFrame;
 
   /** A palette tile chosen without a pointer, and the phone's plus button, drop a part where
