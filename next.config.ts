@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
-// Set NEXT_PUBLIC_BASE_PATH=/<repo> when deploying to a GitHub Pages project site.
+// GitHub Pages project site: https://leon426.github.io/android-canvas/
+// The deploy workflow sets NEXT_PUBLIC_BASE_PATH from actions/configure-pages
+// (this repo: /android-canvas, no trailing slash). Leave it unset for `next dev`,
+// which should stay at /. The value is inlined at build time.
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 const nextConfig: NextConfig = {

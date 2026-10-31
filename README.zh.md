@@ -1,3 +1,5 @@
+> **Fork note:** 本页是上游 [lnkiai/m3e-canvas](https://github.com/lnkiai/m3e-canvas) 的中文 README。这个 fork 的说明（含组件库）在 [README.md](README.md)。
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-dark.png" />
