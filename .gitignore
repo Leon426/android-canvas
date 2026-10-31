@@ -22,6 +22,14 @@
 
 # misc
 .DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
 *.pem
 
 # debug
