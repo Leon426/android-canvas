@@ -1,4 +1,5 @@
 import { KIND_TEXT, Lang, SWIPE_TEXT, TRANSITION_TEXT, getLang } from "./i18n";
+import { definitionsOf, normalizeComponentLibrary, type ComponentDefinition, type ComponentStyle } from "./componentLibrary";
 import { constrainModalRails } from "./rail";
 import {
   CONTENT_W,
@@ -1567,6 +1568,13 @@ const PH = {
       return `${fallback ? "フォールバック用のテーマ" : "テーマ"}は ${label} 系です。${scheme}に次の色を設定し、UI の色はすべてこのロール経由で参照してください。`;
     },
     hTheme: "## 形・文字・動き",
+    hLibrary: "## コンポーネントライブラリ",
+    libraryIntro: "再利用できる名前付きコンポーネント定義です。画面上の部品はこれらの定義を参照し、必要なら上書きします。",
+    libraryNone: "（スタイル指定なし）",
+    libraryExtends: (name: string) => `継承元: ${name}`,
+    libraryRefs: (n: number) => (n === 1 ? "参照 1 件" : `参照 ${n} 件`),
+    libraryLine: (name: string, kind: string, extras: string[], refs: string) =>
+      `- ${name}（${kind}${extras.length ? `；${extras.join("；")}` : ""}）${refs ? ` — ${refs}` : ""}`,
     hLayout: "## 画面構成",
     empty: "画面にはまだ部品が置かれていません。",
     screens: (names: string[]) => `画面は ${names.length} つあり、${names.join("、")}です。`,
@@ -1611,6 +1619,13 @@ const PH = {
       return `The ${fallback ? "fallback theme" : "theme"} is ${label}. Set these on the ${scheme} and reference every UI color through its role.`;
     },
     hTheme: "## Shape, type and motion",
+    hLibrary: "## Component library",
+    libraryIntro: "Named reusable component definitions. Canvas parts reference these and may override values per instance.",
+    libraryNone: "(no style overrides)",
+    libraryExtends: (name: string) => `extends ${name}`,
+    libraryRefs: (n: number) => (n === 1 ? "1 instance" : `${n} instances`),
+    libraryLine: (name: string, kind: string, extras: string[], refs: string) =>
+      `- ${name} (${kind}${extras.length ? `; ${extras.join("; ")}` : ""})${refs ? ` — ${refs}` : ""}`,
     hLayout: "## Layout",
     empty: "Nothing has been placed on the screen yet.",
     screens: (names: string[]) => `There are ${names.length} screens: ${names.join(", ")}.`,
@@ -1655,6 +1670,13 @@ const PH = {
       return `${fallback ? "备用主题" : "主题"}为 ${label} 系。请在${scheme}中设置以下颜色，UI 的所有颜色都通过这些角色引用。`;
     },
     hTheme: "## 形状、字体与动效",
+    hLibrary: "## 组件库",
+    libraryIntro: "可复用的命名组件定义。画布上的部件引用这些定义，并可以按实例覆盖样式。",
+    libraryNone: "（无样式覆盖）",
+    libraryExtends: (name: string) => `继承自 ${name}`,
+    libraryRefs: (n: number) => (n === 1 ? "1 处引用" : `${n} 处引用`),
+    libraryLine: (name: string, kind: string, extras: string[], refs: string) =>
+      `- ${name}（${kind}${extras.length ? `；${extras.join("；")}` : ""}）${refs ? ` — ${refs}` : ""}`,
     hLayout: "## 屏幕结构",
     empty: "屏幕上还没有放置任何组件。",
     screens: (names: string[]) => `共有 ${names.length} 个屏幕：${names.join("、")}。`,
@@ -1684,6 +1706,13 @@ const PH = {
       return `${fallback ? "대체 테마" : "테마"}는 ${label} 계열이다. ${scheme}에 다음 색상을 설정하고 모든 UI 색상을 해당 역할로 참조한다.`;
     },
     hTheme: "## 모양, 글꼴 및 모션",
+    hLibrary: "## 컴포넌트 라이브러리",
+    libraryIntro: "재사용할 수 있는 이름 있는 컴포넌트 정의입니다. 캔버스 부품이 이 정의를 참조하며 인스턴스별로 덮어쓸 수 있습니다.",
+    libraryNone: "(스타일 지정 없음)",
+    libraryExtends: (name: string) => `상속: ${name}`,
+    libraryRefs: (n: number) => (n === 1 ? "참조 1건" : `참조 ${n}건`),
+    libraryLine: (name: string, kind: string, extras: string[], refs: string) =>
+      `- ${name}(${kind}${extras.length ? `; ${extras.join("; ")}` : ""})${refs ? ` — ${refs}` : ""}`,
     hLayout: "## 화면 구성",
     empty: "화면에 아직 부품이 없습니다.",
     screens: (names: string[]) => `화면은 ${names.length}개이며 ${names.join(", ")}입니다.`,
@@ -1737,6 +1766,67 @@ export const PROMPT_OPTION_TEXT: Record<Lang, Record<PromptOption, { label: stri
     offline: { label: "오프라인 지원", icon: "cloud_off", line: "네트워크가 없어도 주요 기능을 쓸 수 있게 하고, 필요하면 재연결 시 동기화한다." },
   },
 };
+
+/** Count canvas references to each definition id (package-qualified or not). */
+function instanceRefCounts(groups: Group[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const group of groups) {
+    for (const item of group.items) {
+      const id = item.component?.definitionId;
+      if (!id) continue;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** Compact style summary for a definition: only keys the author actually set. */
+function styleSummary(style: ComponentStyle, lang: Lang): string {
+  const parts: string[] = [];
+  if (style.variant) parts.push(VARIANT_TEXT[lang][style.variant]);
+  if (style.size !== undefined) parts.push(`size ${style.size}`);
+  if (style.size2 !== undefined) parts.push(`size2 ${style.size2}`);
+  if (style.radiusTop !== undefined) parts.push(`radiusTop ${style.radiusTop}`);
+  if (style.radiusBottom !== undefined) parts.push(`radiusBottom ${style.radiusBottom}`);
+  if (style.corners) {
+    const { tl, tr, bl, br } = style.corners;
+    parts.push(`corners ${tl}/${tr}/${bl}/${br}`);
+  }
+  if (style.fill) parts.push(`fill ${style.fill}`);
+  if (style.iconFill) parts.push(`iconFill ${style.iconFill}`);
+  if (style.textColor) parts.push(`textColor ${style.textColor}`);
+  if (style.bold !== undefined) parts.push(style.bold ? "bold" : "regular");
+  return parts.join(", ");
+}
+
+function libraryDefinitionName(definitions: ComponentDefinition[], id: string | undefined): string | undefined {
+  if (!id) return undefined;
+  return definitions.find((definition) => definition.id === id)?.name;
+}
+
+/** Append the named component-library section when the document has definitions. */
+function pushLibrarySection(lines: string[], doc: Doc, lang: Lang): void {
+  const library = normalizeComponentLibrary(doc.componentLibrary);
+  const definitions = definitionsOf(library);
+  if (!definitions.length) return;
+  const ph = PH[lang];
+  const refs = instanceRefCounts(doc.groups);
+  lines.push("");
+  lines.push(ph.hLibrary);
+  lines.push(ph.libraryIntro);
+  for (const pack of library.packages) {
+    for (const definition of pack.definitions) {
+      const kind = KIND_TEXT[lang][definition.baseKind]?.noun ?? definition.baseKind;
+      const extras: string[] = [];
+      const parent = libraryDefinitionName(pack.definitions, definition.extends);
+      if (parent) extras.push(ph.libraryExtends(parent));
+      const styles = styleSummary(definition.style, lang);
+      extras.push(styles || ph.libraryNone);
+      const count = refs.get(definition.id) ?? 0;
+      lines.push(ph.libraryLine(definition.name, kind, extras, count ? ph.libraryRefs(count) : ""));
+    }
+  }
+}
 
 /** A place in the prompt the outline can point at: a section heading, or the line a screen
  *  begins on. Read off the text itself, so an edited prompt keeps its marks while its headings
@@ -1832,6 +1922,8 @@ export function buildPrompt(doc: Doc, widths: Record<string, number>, onlyFrameI
   lines.push("");
   lines.push(ph.hTheme);
   lines.push(...themeLines(th, lang));
+
+  pushLibrarySection(lines, doc, lang);
 
   lines.push("");
   lines.push(ph.hLayout);

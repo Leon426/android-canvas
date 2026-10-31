@@ -308,6 +308,7 @@ export function PromptPanel({
   palette: p,
   onDoc,
   onCover,
+  onDownloadBundle,
 }: {
   doc: Doc;
   widths: Record<string, number>;
@@ -315,6 +316,8 @@ export function PromptPanel({
   onDoc: (patch: Partial<Doc>) => void;
   /** told when the full-screen cover has opened, and when it starts to close */
   onCover?: (up: boolean) => void;
+  /** Download the Agent Bundle (unresolved prototype + library + prompt). */
+  onDownloadBundle?: () => void;
 }) {
   const lang = useLang();
   const generated = useMemo(() => buildPrompt(doc, widths, undefined, lang), [doc, widths, lang]);
@@ -466,7 +469,10 @@ export function PromptPanel({
           readOnly
           corner={
             <div style={{ display: "flex", width: "100%", justifyContent: "flex-end" }}>
-              <div className="m3-run" style={{ display: "flex", gap: 3 }}>
+              <div className="m3-run" style={{ display: "flex", gap: 3, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {onDownloadBundle && (
+                  <IconBtn icon="download" p={p} size={44} onClick={onDownloadBundle} title={t("downloadAgentBundle", lang)} />
+                )}
                 <CopyButton copied={copied} onClick={copy} p={p} />
                 <IconBtn icon="open_in_full" p={p} size={44} on onClick={open} title={t("fullscreen", lang)} />
               </div>
@@ -588,6 +594,9 @@ export function PromptPanel({
                   {/* the copy and the way back to the panel, joined: both are about being done here. On
                       the way out the button already wears the panel's icon, so the hand-over is seamless. */}
                   <div className="m3-run" style={{ display: "flex", gap: 3 }}>
+                    {onDownloadBundle && (
+                      <IconBtn icon="download" p={p} size={44} onClick={onDownloadBundle} title={t("downloadAgentBundle", lang)} />
+                    )}
                     <CopyButton copied={copied} onClick={copy} p={p} />
                     <IconBtn icon={cover === "closing" ? "open_in_full" : "close_fullscreen"} p={p} size={44} on onClick={close} title={t(cover === "closing" ? "fullscreen" : "exitFullscreen", lang)} />
                   </div>

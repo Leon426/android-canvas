@@ -323,6 +323,7 @@ export const UI = {
   targetAndroid: { ja: "Android のネイティブアプリとして作る", en: "Build as a native Android app", zh: "作为 Android 原生应用构建" },
   targetWeb: { ja: "ブラウザで動く Web アプリとして作る", en: "Build as a web app that runs in the browser", zh: "作为在浏览器中运行的 Web 应用构建" },
   copyPrompt: { ja: "プロンプトをコピー", en: "Copy prompt", zh: "复制提示词" },
+  downloadAgentBundle: { ja: "Agent Bundle をダウンロード", en: "Download Agent Bundle", zh: "下载 Agent Bundle" },
   // preview
   back: { ja: "戻る", en: "Back", zh: "返回" },
   close: { ja: "閉じる", en: "Close", zh: "关闭" },
@@ -578,7 +579,7 @@ export const KO: Record<UIKey, string> = {
   dynamicOffHint: "켜면 실제 기기는 배경화면 색상을 사용하고 여기의 색상은 대체 색상이 됩니다.", closeBtn: "닫기", screens: "화면 선택",
   noLayers: "이 화면에는 아직 부품이 없습니다", showParts: "안의 부품 표시", hideParts: "안의 부품 숨기기", lock: "잠금", unlock: "잠금 해제", lockedGroup: "잠긴 그룹입니다. 먼저 레이어 패널에서 잠금을 해제하세요", lockedKept: "잠긴 그룹의 부품은 삭제하지 않고 남겼습니다", lockedEdit: "잠금 중입니다. 스위치로 해제",
   brief: "이 앱에 대한 설명…", appName: "앱 이름", targetPlatform: "구현 대상", targetAndroid: "Android 네이티브 앱으로 만들기",
-  targetWeb: "브라우저에서 실행되는 웹 앱으로 만들기", copyPrompt: "프롬프트 복사", back: "뒤로", close: "닫기", cancel: "취소", ok: "확인",
+  targetWeb: "브라우저에서 실행되는 웹 앱으로 만들기", copyPrompt: "프롬프트 복사", downloadAgentBundle: "Agent Bundle 다운로드", back: "뒤로", close: "닫기", cancel: "취소", ok: "확인",
   leading: "앞쪽", trailing: "뒤쪽", title: "제목", body: "본문", message: "메시지", placeholder: "자리 표시자", regular: "보통 굵기", typeBody: "본문", typeTitle: "제목", typeHeadline: "헤드라인", typeDisplay: "디스플레이", home: "홈", screenN: "화면", copySuffix: " 복사본", mobileNote: "창이 좁습니다. 창을 넓히거나 최대화하여 전체 기능을 사용하세요",
   addButton: "버튼 추가", done: "완료", theme: "테마", settings: "테마 및 설정", shape: "모양", typography: "글꼴", motion: "모션",
   brightness: "밝기", light: "라이트", dark: "다크", contrast: "대비", bothModes: "둘 다", contrastStandard: "표준", contrastMedium: "중간", contrastHigh: "높음",

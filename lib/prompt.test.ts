@@ -297,6 +297,41 @@ describe("buildPrompt structure", () => {
     expect(headings(prompt)).toEqual(SECTIONS.ja);
     expect(prompt).toContain("「Save」");
   });
+
+  it.each(LANGS)("adds a component-library section with definition name, kind, extends, styles and refs in %s", (lang) => {
+    setGlobalLang(lang);
+    const doc = fixture();
+    doc.componentLibrary = {
+      schemaVersion: 2,
+      activePackageId: "notes",
+      packages: [{
+        id: "notes",
+        name: "Notes",
+        definitions: [
+          { id: "base-btn", name: "Base Button", baseKind: "button", style: { variant: "tonal" } },
+          { id: "save-btn", name: "Save Button", baseKind: "button", extends: "base-btn", style: { radiusTop: 12 } },
+        ],
+      }],
+    };
+    doc.groups = [{
+      id: "g",
+      x: 0,
+      y: 0,
+      axis: "x",
+      items: [{ ...makeItem("button"), id: "b1", label: "Save", component: { packageId: "notes", definitionId: "save-btn" } }],
+    }];
+    const prompt = buildPrompt(doc, {}, undefined, lang);
+    const libraryHeading = { ja: "## コンポーネントライブラリ", en: "## Component library", zh: "## 组件库", ko: "## 컴포넌트 라이브러리" }[lang];
+    expect(headings(prompt)).toContain(libraryHeading);
+    expect(prompt).toContain("Save Button");
+    expect(prompt).toContain("Base Button");
+    expect(prompt).toMatch(/radiusTop 12/);
+    expect(prompt).toMatch(/1 instance|参照 1 件|1 处引用|참조 1건/);
+  });
+
+  it("omits the component-library section when there are no definitions", () => {
+    expect(headings(build("en"))).toEqual(SECTIONS.en);
+  });
 });
 
 /* The placeholder parts state their box, and a dropdown names its options and initial value.

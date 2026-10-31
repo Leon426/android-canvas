@@ -125,10 +125,16 @@ import { GitHubLink, Mode, Toolbar } from "@/components/Toolbar";
 import { LangMenu } from "@/components/Menus";
 import { AiActionKey, AiPanel, aiErrorText } from "@/components/AiPanel";
 import { TidyState, PANEL_FADE_H } from "@/components/ui";
-import { AiSettings, DEFAULT_AI, hasKey, isSecureUrl, loadAiSettings, proposeBehavior, proposeDescription, pushHistory, saveAiSettings } from "@/lib/ai";
+import { AiSettings, DEFAULT_AI, hasKey, isSecureUrl, proposeBehavior, proposeDescription, pushHistory, saveAiSettings } from "@/lib/ai";
 import { barSlotOf, bodyRect, carryFrame, holdsEdgeBar, maxFrameLength, minFrameLength, pullInto, stretchFrame, tidyFrame } from "@/lib/tidy";
 import { constrainModalRails, modalRailOf, updateRail } from "@/lib/rail";
+import { downloadAgentBundle } from "@/lib/agentBundle";
+import { DOC_KEY } from "@/lib/localDoc";
 import { isProject, readProject, saveProject } from "@/lib/project";
+import { useComponentLibraryActions } from "@/app/editor/useComponentLibraryActions";
+import { BEFORE_KEY, useDocumentPersistence } from "@/app/editor/useDocumentPersistence";
+import { useEditorHistory } from "@/app/editor/useEditorHistory";
+import type { Snapshot } from "@/app/editor/types";
 import { hasShareHash, readShareHash } from "@/lib/share";
 import { LoadingIndicator } from "@/components/Loading";
 import { draftDesign } from "@/lib/ai";
@@ -141,7 +147,7 @@ import { ConfirmDialog, IconBtn, Segmented } from "@/components/ui";
 import { createLoginTemplateGroups } from "@/lib/exampleTemplates";
 import { ComponentLibraryPanel, ComponentPackagePicker } from "@/components/ComponentLibraryPanel";
 import { Lang, LangContext, SEED_TEXT, getLang, setGlobalLang, t, translateDefaultFrameName, translateDefaultText } from "@/lib/i18n";
-import { componentStyleOf, DEFAULT_CUSTOM_PACKAGE_ID, EMPTY_COMPONENT_LIBRARY, isComponentStyleKey, normalizeComponentLibrary, OFFICIAL_PACKAGE_ID, resolveComponentInstance, resolveDocumentComponents, type ComponentLibrary } from "@/lib/componentLibrary";
+import { EMPTY_COMPONENT_LIBRARY, isComponentStyleKey, OFFICIAL_PACKAGE_ID, resolveComponentInstance, resolveDocumentComponents, type ComponentLibrary } from "@/lib/componentLibrary";
 
 /** the screens while a model drafts: primary, tertiary and primary container, drifting */
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -175,13 +181,6 @@ const MAX_Z = 3;
  *  toolbar's row at the top, a margin elsewhere */
 const GLIDE_TOP = 84;
 const GLIDE_PAD = 40;
-const HISTORY_MAX = 100;
-const DOC_KEY = "m3e:doc";
-/** the design a draft or a link replaced, until the author keeps or undoes it */
-const BEFORE_KEY = "m3e:doc:before";
-const DOC_LOCK = "m3e:doc:editor";
-const UI_KEY = "m3e:ui";
-
 type View = { x: number; y: number; z: number };
 type Snap = { groupId: string; index: number; pull: number };
 
@@ -240,11 +239,6 @@ type Gesture =
       moved: boolean;
     }
   | { kind: "group"; id: string; sx: number; sy: number; gx: number; gy: number; moved: boolean; overBin: boolean; guide?: Guide | null };
-
-/** everything in a document apart from its screens and parts */
-type DocMeta = Omit<Doc, "groups" | "frames">;
-/** an undo step: the screens and parts, plus the rest of the document for steps that replaced it all */
-type Snapshot = { groups: Group[]; frames: Frame[]; meta?: DocMeta };
 
 /** The parts a lone one of can be resized on the canvas itself: the controls that carry a size,
  *  and the indicators, whose width is the thing an author reaches for most. */
@@ -521,6 +515,8 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [draftBefore, setDraftBefore] = useState<Doc | null>(null);
   const draftBeforeRef = useRef<Doc | null>(null);
   draftBeforeRef.current = draftBefore;
+  /** true after a kept draft until the author undoes something, so the header's undo also sits by the opener */
+  const [quickUndo, setQuickUndo] = useState(false);
   /** true for the moment after a design arrives, so its colours ease over */
   const [revealing, setRevealing] = useState(false);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -568,7 +564,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [drag, setDrag] = useState<DragState | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>({});
-  const [, bumpHistory] = useState(0);
   /* ---------- tidy and ai ---------- */
   /** the groups before and after the last tidy; "undo" is offered only while the after-state is still current */
   const tidyRef = useRef<{ frameId: string; before: Group[]; after: Group[] } | null>(null);
@@ -633,356 +628,92 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   } | null>(null);
   /** groups that must reposition without animating on the next render */
   const instantRef = useRef<Set<string>>(new Set());
-  const loadedRef = useRef(false);
   const initialLangRef = useRef<Lang>(initialLang);
-  /** A saved document or the first viewport initialization prevents later reseeding. */
-  const hadDocRef = useRef(false);
+  const interruptPreviewRef = useRef<() => void>(() => {});
+  /* fit / doc refs are assigned once their implementations exist further down */
+  const fitRef = useRef<(animate?: boolean) => void>(() => {});
+  const docRef = useRef<Doc>(null!);
 
-  /* ---------- history ---------- */
-  const pastRef = useRef<Snapshot[]>([]);
-  const futureRef = useRef<Snapshot[]>([]);
-  const lastPatchRef = useRef<{ key: string; at: number }>({ key: "", at: 0 });
-
-  const snapshot = useCallback((withMeta = false) => {
-    lastPatchRef.current = { key: "", at: 0 };
-    setQuickUndo(false);
-    pastRef.current.push(current(withMeta));
-    if (pastRef.current.length > HISTORY_MAX) pastRef.current.shift();
-    futureRef.current = [];
-    bumpHistory((v) => v + 1);
-  }, []);
-
-  /** consecutive edits of the same field collapse into one undo step */
-  const snapshotFor = useCallback(
-    (key: string) => {
-      const now = Date.now();
-      const last = lastPatchRef.current;
-      if (last.key !== key || now - last.at > 800) snapshot();
-      lastPatchRef.current = { key, at: now };
+  const { applyDoc, loadedRef, hadDocRef } = useDocumentPersistence(
+    {
+      initialLang,
+      initialLangRef,
+      onReadyRef,
+      interruptPreviewRef,
+      fitRef,
+      framesRef,
+      migrateGroups,
+      seed,
+      seedFrames: (lang) => [{ ...SEED_FRAMES[0], name: t("home", lang) }],
+      setGroups,
+      setFrames,
+      setPaletteKey,
+      setCustomPalette,
+      setDynamicColor,
+      setTheme,
+      setTitle,
+      setBrief,
+      setPromptEdit,
+      setPromptOptions,
+      setComponentLibrary,
+      setPlatform,
+      setDraftBefore,
+      setAiSettings,
+      setView,
+      setLeftOpen,
+      setRightOpen,
+      setFavorites,
+      setMode,
+      setEditAccess,
     },
-    [snapshot],
+    {
+      editAccess,
+      groups,
+      frames,
+      paletteKey,
+      frame,
+      title,
+      brief,
+      promptEdit,
+      promptOptions,
+      platform,
+      customPalette,
+      dynamicColor,
+      theme,
+      componentLibrary,
+      view,
+      leftOpen,
+      rightOpen,
+      leftW,
+      rightW,
+      favorites,
+      mode,
+      lang,
+      boot: {
+        surface: p.surface,
+        container: p.surfaceContainer,
+        low: p.surfaceContainerLow,
+        high: p.surfaceContainerHigh,
+        primary: p.primary,
+        canvas: frame === "phone" ? canvasPalette.surfaceContainerLow : "#ffffff",
+      },
+    },
   );
 
-  const restore = (snap: Snapshot) => {
-    lastPatchRef.current = { key: "", at: 0 };
-    for (const g of snap.groups) instantRef.current.add(g.id);
-    if (snap.meta) {
-      applyDoc({ ...snap.meta, groups: snap.groups, frames: snap.frames }, true);
-      if (!mobileRef.current) {
-        const mode = snap.meta.frame === "blank" ? "blank" : "phone";
-        setFrame(mode);
-        frameRef.current = mode;
-      }
-    } else {
-      setGroups(snap.groups);
-      setFrames(snap.frames);
-    }
-    bumpHistory((v) => v + 1);
-  };
-
-  /** the current step as a snapshot; `withMeta` when the step being crossed replaced the whole document */
-  const current = (withMeta: boolean): Snapshot => {
-    const { groups: _g, frames: _f, ...meta } = docRef.current;
-    return { groups: groupsRef.current, frames: framesRef.current, meta: withMeta ? meta : undefined };
-  };
-
-  const undo = useCallback(() => {
-    setQuickUndo(false);
-    const prev = pastRef.current.pop();
-    if (!prev) return;
-    futureRef.current.push(current(!!prev.meta));
-    restore(prev);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const redo = useCallback(() => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    pastRef.current.push(current(!!next.meta));
-    restore(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    instantRef.current.clear();
+  /* ---------- history ---------- */
+  const { pastRef, futureRef, lastPatchRef, snapshot, snapshotFor, undo, redo } = useEditorHistory({
+    groupsRef,
+    framesRef,
+    docRef,
+    frameRef,
+    mobileRef,
+    instantRef,
+    setGroups,
+    setFrames,
+    setFrame,
+    setQuickUndo,
+    applyDoc,
   });
-
-  /* ---------- persistence ---------- */
-  useEffect(() => {
-    /* The first tab keeps this promise pending for its lifetime. Later tabs get
-       `null` immediately and stay read-only until they are reloaded. Where the
-       browser has no locks (an insecure origin, an old WebKit) the editor works
-       as it always did, without the guard. */
-    if (!navigator.locks) {
-      setEditAccess("editable");
-      return;
-    }
-    let active = true;
-    let releaseLock: (() => void) | undefined;
-    /* Wait until React has finished its development-only effect replay. This
-       prevents the discarded setup from briefly competing with the real one. */
-    queueMicrotask(() => {
-      if (!active) return;
-      void navigator.locks
-        .request(DOC_LOCK, { ifAvailable: true }, async (lock) => {
-          if (!active) return;
-          if (!lock) {
-            setEditAccess("readonly");
-            return;
-          }
-          setEditAccess("editable");
-          await new Promise<void>((resolve) => {
-            releaseLock = resolve;
-          });
-        })
-        .catch(() => {
-          if (active) setEditAccess("editable");
-        });
-    });
-    return () => {
-      active = false;
-      releaseLock?.();
-    };
-  }, []);
-
-  /** Puts a stored or opened document into the editor. Fields a partial document
-   *  leaves out keep their current value, or go back to the default when `reset`. */
-  const applyDoc = (doc: Partial<Doc>, reset: boolean) => {
-    // A document can arrive during the opening glide, before previewId is set. The
-    // screen the glide was heading for belongs to the replaced document, so the pending
-    // opening is dropped and the camera returns; an open preview simply closes.
-    if (previewTimer.current !== null) abandonPreview();
-    else {
-      /* a return still on its way would drag the camera off the new document's fit */
-      cancelReturn();
-      if (previewIdRef.current !== null) {
-        setPreviewId(null);
-        viewBeforePreview.current = null;
-      }
-    }
-    const frames = Array.isArray(doc.frames) ? doc.frames : framesRef.current;
-    if (Array.isArray(doc.groups)) setGroups(migrateGroups(doc.groups, frames));
-    if (Array.isArray(doc.frames)) setFrames(doc.frames);
-    if (typeof doc.paletteKey === "string" && doc.paletteKey) setPaletteKey(doc.paletteKey);
-    else if (reset) setPaletteKey("purple");
-    /* normalize once so a scheme saved before the secondary role gets it and keeps it on re-save */
-    if (doc.customPalette && typeof doc.customPalette.primary === "string") setCustomPalette(paletteOf("custom", doc.customPalette));
-    else if (reset) setCustomPalette(null);
-    if (typeof doc.dynamicColor === "boolean") setDynamicColor(doc.dynamicColor);
-    else if (reset) setDynamicColor(false);
-    if (doc.theme && typeof doc.theme === "object") setTheme(normalizeTheme(doc.theme));
-    else if (reset) setTheme(normalizeTheme(undefined));
-    if (typeof doc.title === "string") setTitle(doc.title);
-    else if (reset) setTitle("");
-    if (typeof doc.brief === "string") setBrief(doc.brief);
-    else if (reset) setBrief("");
-    if (typeof doc.promptEdit === "string") setPromptEdit(doc.promptEdit);
-    else if (reset) setPromptEdit(undefined);
-    if (Array.isArray(doc.promptOptions)) setPromptOptions(doc.promptOptions);
-    else if (reset) setPromptOptions(undefined);
-    if (doc.componentLibrary) setComponentLibrary(normalizeComponentLibrary(doc.componentLibrary, `${t("customPackageDefault", lang)} 1`));
-    else if (reset) setComponentLibrary(EMPTY_COMPONENT_LIBRARY);
-    if (isPlatform(doc.platform)) setPlatform(doc.platform);
-    else if (reset) setPlatform(null);
-  };
-
-  useEffect(() => {
-    // React's development double-run would otherwise read back its own first save
-    if (loadedRef.current) return;
-    try {
-      const d = localStorage.getItem(DOC_KEY);
-      if (d) {
-        hadDocRef.current = true;
-        applyDoc(JSON.parse(d) as Partial<Doc>, false);
-        // frame mode is decided by the device (media-query effect), not restored
-      }
-      const before = d ? localStorage.getItem(BEFORE_KEY) : null;
-      if (!d) localStorage.removeItem(BEFORE_KEY);
-      if (before) {
-        const value: unknown = JSON.parse(before);
-        if (isProject(value)) setDraftBefore(value);
-        else localStorage.removeItem(BEFORE_KEY);
-      }
-      const u = localStorage.getItem(UI_KEY);
-      if (u) {
-        const ui = JSON.parse(u);
-        if (ui.view) setView(ui.view);
-        if (typeof ui.leftOpen === "boolean") setLeftOpen(ui.leftOpen);
-        if (typeof ui.rightOpen === "boolean") setRightOpen(ui.rightOpen);
-        if (Array.isArray(ui.favorites)) setFavorites(ui.favorites);
-        if (ui.mode) setMode(ui.mode);
-      } else {
-        queueMicrotask(() => fitRef.current());
-      }
-      setGlobalLang(initialLang);
-      initialLangRef.current = initialLang;
-      if (!d) {
-        setGroups(seed(initialLang));
-        setFrames([{ ...SEED_FRAMES[0], name: t("home", initialLang) }]);
-      }
-    } catch {}
-    setAiSettings(loadAiSettings());
-    loadedRef.current = true;
-    /* the document is in state; one frame later it is on screen and the boot overlay may go.
-       Not cancelled on cleanup: the development double-run skips this effect the second time. */
-    requestAnimationFrame(() => onReadyRef.current?.());
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.lang = lang;
-    /* the editor's own text and the parts both pick up the language's Noto face */
-    document.body.style.fontFamily = uiFontFamily(lang);
-    ensureLangFontLoaded(lang, () => setWidths({}));
-  }, [lang]);
-
-  useEffect(() => {
-    /* an empty width map makes every measured part read its width again in the new face */
-    ensureFontLoaded(theme.font, () => setWidths({}));
-  }, [theme.font]);
-
-  /* the page background outside the app root follows the scheme, so dark mode has no white edges */
-  useEffect(() => {
-    document.body.style.background = p.surface;
-    document.body.style.color = p.onSurface;
-  }, [p.surface, p.onSurface]);
-
-  /* in-app browsers size the page behind their own toolbars and may ignore dvh,
-     so the measured inner height wins over the CSS height (innerHeight, not the
-     visual viewport, so pinch-zoom and the keyboard leave the layout alone) */
-  useEffect(() => {
-    const apply = () => {
-      const h = Math.round(window.innerHeight);
-      if (h > 0) document.documentElement.style.setProperty("--app-h", `${h}px`);
-    };
-    /* in-app browsers (X, Instagram, LINE...) keep their own action bar over the
-       page bottom, so the controls sit one button higher there. App names in the
-       user agent are unreliable; the embedded web view itself is not: iOS web
-       views omit the Safari token and Android ones carry "wv" */
-    const ua = navigator.userAgent;
-    const iosWebView = /iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua);
-    const androidWebView = /Android/.test(ua) && /(?:^|\W)wv(?:\W|$)/.test(ua);
-    if (iosWebView || androidWebView || /Twitter|Instagram|FBAN|FBAV|Line\//i.test(ua)) {
-      document.documentElement.style.setProperty("--bottom-ui", "64px");
-    }
-    apply();
-    window.addEventListener("resize", apply);
-    window.addEventListener("orientationchange", apply);
-    return () => {
-      window.removeEventListener("resize", apply);
-      window.removeEventListener("orientationchange", apply);
-    };
-  }, []);
-
-  /* everyone works on phone screens; a phone gets one fixed screen and the select tool only */
-  useEffect(() => {
-    const mqFine = window.matchMedia("(pointer: fine)");
-    const mqCoarse = window.matchMedia("(pointer: coarse)");
-    let prevW = window.innerWidth;
-
-    // Initial check on mount: if on desktop in split-screen (< 960px) and no explicit saved UI, collapse right sidebar
-    if (mqFine.matches && window.innerWidth < 960) {
-      try {
-        const u = localStorage.getItem(UI_KEY);
-        if (!u || typeof JSON.parse(u)?.rightOpen !== "boolean") {
-          setRightOpen(false);
-        }
-      } catch {}
-    }
-
-    const computeIsMobile = () => {
-      const isFine = mqFine.matches;
-      // For desktop (mouse/trackpad): do not treat as mobile even when split-screen (e.g. 640px~960px).
-      // Only treat as mobile if window is extremely narrow (< 640px).
-      if (isFine) {
-        return window.innerWidth < 640;
-      }
-      // For touch-only devices: mobile breakpoint lowered to 640px (phones) or coarse pointer <= 768px.
-      return window.innerWidth < 640 || (mqCoarse.matches && window.innerWidth <= 768);
-    };
-
-    const apply = () => {
-      const w = window.innerWidth;
-      // Auto-collapse right panel if desktop window is resized below 960px to preserve canvas room
-      if (mqFine.matches && w < 960 && prevW >= 960) {
-        setRightOpen(false);
-      }
-      prevW = w;
-
-      const m = computeIsMobile();
-      setIsMobile(m);
-      mobileRef.current = m;
-      if (m) {
-        setMode("select");
-        setSheet(null);
-        if (!hadDocRef.current) {
-          hadDocRef.current = true;
-          setGroups(mobileSeed(initialLangRef.current));
-          setFrames([{ id: uid(), name: t("home", initialLangRef.current), x: 0, y: 0 }]);
-        }
-      }
-      hadDocRef.current = true;
-      if (frameRef.current !== "phone") {
-        setFrame("phone");
-        frameRef.current = "phone";
-      }
-      ensureFrameRef.current();
-      queueMicrotask(() => {
-        fitRef.current();
-        setViewReady(true);
-      });
-    };
-    apply();
-    window.addEventListener("resize", apply);
-    mqFine.addEventListener("change", apply);
-    mqCoarse.addEventListener("change", apply);
-    return () => {
-      window.removeEventListener("resize", apply);
-      mqFine.removeEventListener("change", apply);
-      mqCoarse.removeEventListener("change", apply);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!loadedRef.current || editAccess !== "editable") return;
-    try {
-      localStorage.setItem(
-        DOC_KEY,
-        JSON.stringify({ groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform: platform ?? undefined, customPalette: customPalette ?? undefined, dynamicColor, theme, componentLibrary }),
-      );
-    } catch {}
-  }, [editAccess, groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme, componentLibrary]);
-
-  useEffect(() => {
-    if (!loadedRef.current) return;
-    try {
-      localStorage.setItem(
-        UI_KEY,
-        JSON.stringify({
-          view,
-          leftOpen,
-          rightOpen,
-          leftW,
-          rightW,
-          favorites,
-          mode,
-          lang,
-          /* the theme's surfaces, so the shell drawn before the editor loads is already this colour */
-          boot: { surface: p.surface, container: p.surfaceContainer, low: p.surfaceContainerLow, high: p.surfaceContainerHigh, primary: p.primary, canvas: frame === "phone" ? canvasPalette.surfaceContainerLow : "#ffffff" },
-        }),
-      );
-    } catch {}
-  }, [
-    view,
-    leftOpen,
-    rightOpen,
-    leftW,
-    rightW,
-    p,
-    frame,
-    favorites,
-    mode,
-    lang,
-  ]);
 
   /* ---------- measurement (text-sized kinds) ---------- */
   const allItems = useMemo(() => {
@@ -1138,7 +869,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
       setView(nextView);
     }
   }, []);
-  const fitRef = useRef(fit);
   fitRef.current = fit;
 
   /* Automatically adjust canvas viewport on container resize */
@@ -1160,7 +890,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
       prevH = height;
 
       if (!hadSize) {
-        fitRef.current(false);
+        fitRef.current();
         return;
       }
       if (gestureRef.current !== null || dragRef.current?.active) return;
@@ -2408,6 +2138,27 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     });
   };
 
+  const {
+    onActivePackage,
+    onCreatePackage,
+    onRenamePackage,
+    onDeletePackage,
+    onRenameDefinition,
+    onDeleteDefinition,
+    onSaveAsComponent,
+    onUpdateComponent,
+    onDetachComponent,
+  } = useComponentLibraryActions({
+    lang,
+    componentLibrary,
+    setComponentLibrary,
+    setGroups,
+    selected,
+    selectedResolved,
+    snapshot,
+    patchSelected,
+  });
+
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const ids = new Set(selectedIds);
@@ -2868,7 +2619,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     }
   };
   /** true after a kept draft until the author undoes something, so the header's undo also sits by the opener */
-  const [quickUndo, setQuickUndo] = useState(false);
   const keepDraft = () => {
     setDraftBefore(null);
     setQuickUndo(true);
@@ -3574,6 +3324,16 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     viewBeforePreview.current = null;
     if (back) glide(back);
   };
+  interruptPreviewRef.current = () => {
+    if (previewTimer.current !== null) abandonPreview();
+    else {
+      cancelReturn();
+      if (previewIdRef.current !== null) {
+        setPreviewId(null);
+        viewBeforePreview.current = null;
+      }
+    }
+  };
   const closePreview = () => {
     setPreviewId(null);
     const back = viewBeforePreview.current;
@@ -3758,7 +3518,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const resolvedGroups = resolvedDoc.groups;
   resolvedGroupsRef.current = resolvedGroups;
   /** the same document, for callbacks that were created on an earlier render */
-  const docRef = useRef(doc);
   docRef.current = doc;
 
   /** arrows from tappable parts to the frames they open */
@@ -4487,78 +4246,12 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   <ComponentLibraryPanel
                     library={componentLibrary}
                     palette={p}
-                    onActive={(activePackageId) => setComponentLibrary((library) => ({ ...library, activePackageId }))}
-                    onCreate={(name) => {
-                      snapshot(true);
-                      setComponentLibrary((library) => {
-                        const id = uid();
-                        return { ...library, activePackageId: id, packages: [...library.packages, { id, name, definitions: [] }] };
-                      });
-                    }}
-                    onRename={(id, name) => {
-                      snapshot(true);
-                      setComponentLibrary((library) => ({
-                        ...library,
-                        packages: library.packages.map((pack) => pack.id === id ? { ...pack, name } : pack),
-                      }));
-                    }}
-                    onDelete={(id) => {
-                      const removed = componentLibrary.packages.find((pack) => pack.id === id);
-                      if (!removed) return;
-                      snapshot(true);
-                      const definitionIds = new Set(removed.definitions.map((definition) => definition.id));
-                      setGroups((current) => current.map((group) => ({
-                        ...group,
-                        items: group.items.map((item) => {
-                          const ref = item.component;
-                          if (!ref || (ref.packageId ? ref.packageId !== id : !definitionIds.has(ref.definitionId))) return item;
-                          const resolved = resolveComponentInstance(item, componentLibrary).item;
-                          const { component: _component, ...detached } = resolved;
-                          return detached;
-                        }),
-                      })));
-                      setComponentLibrary((library) => ({
-                        ...library,
-                        activePackageId: library.activePackageId === id ? OFFICIAL_PACKAGE_ID : library.activePackageId,
-                        packages: library.packages.filter((pack) => pack.id !== id),
-                      }));
-                    }}
-                    onRenameDefinition={(packageId, definitionId, name) => {
-                      snapshot(true);
-                      setComponentLibrary((library) => ({
-                        ...library,
-                        packages: library.packages.map((pack) => pack.id !== packageId ? pack : {
-                          ...pack,
-                          definitions: pack.definitions.map((definition) => definition.id === definitionId ? { ...definition, name } : definition),
-                        }),
-                      }));
-                    }}
-                    onDeleteDefinition={(packageId, definitionId) => {
-                      snapshot(true);
-                      /* canvas instances keep their appearance but lose the definition link */
-                      setGroups((current) => current.map((group) => ({
-                        ...group,
-                        items: group.items.map((item) => {
-                          const ref = item.component;
-                          if (!ref || ref.definitionId !== definitionId) return item;
-                          /* an unqualified reference belongs to the package being cleaned up */
-                          if (ref.packageId && ref.packageId !== packageId) return item;
-                          const resolved = resolveComponentInstance(item, componentLibrary).item;
-                          const { component: _component, ...detached } = resolved;
-                          return detached;
-                        }),
-                      })));
-                      setComponentLibrary((library) => ({
-                        ...library,
-                        packages: library.packages.map((pack) => pack.id !== packageId ? pack : {
-                          ...pack,
-                          definitions: pack.definitions
-                            .filter((definition) => definition.id !== definitionId)
-                            /* inheritance pointing at the removed definition would dangle */
-                            .map((definition) => definition.extends === definitionId ? { ...definition, extends: undefined } : definition),
-                        }),
-                      }));
-                    }}
+                    onActive={onActivePackage}
+                    onCreate={onCreatePackage}
+                    onRename={onRenamePackage}
+                    onDelete={onDeletePackage}
+                    onRenameDefinition={onRenameDefinition}
+                    onDeleteDefinition={onDeleteDefinition}
                   />
                 ) : leftTab === "color" ? (
                   <ColorPanel
@@ -5266,45 +4959,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   frames={frame === "phone" ? frames : []}
                   onChange={patchSelectedInstance}
                   componentLibrary={componentLibrary}
-                  onSaveAsComponent={(name) => {
-                    if (!selected) return;
-                    snapshot(true);
-                    const id = uid();
-                    const active = componentLibrary.activePackageId;
-                    const packageId = active === OFFICIAL_PACKAGE_ID ? (componentLibrary.packages[0]?.id ?? DEFAULT_CUSTOM_PACKAGE_ID) : active;
-                    setComponentLibrary((library) => {
-                      const definition = { id, name, baseKind: selected.kind, style: componentStyleOf(selected) };
-                      const exists = library.packages.some((pack) => pack.id === packageId);
-                      return {
-                        ...library,
-                        activePackageId: packageId,
-                        packages: exists
-                          ? library.packages.map((pack) => pack.id === packageId ? { ...pack, definitions: [...pack.definitions, definition] } : pack)
-                          : [...library.packages, { id: packageId, name: `${t("customPackageDefault", lang)} 1`, definitions: [definition] }],
-                      };
-                    });
-                    patchSelected({ component: { packageId, definitionId: id } });
-                  }}
-                  onUpdateComponent={() => {
-                    if (!selected?.component) return;
-                    snapshot(true);
-                    const ref = selected.component;
-                    setComponentLibrary((library) => ({
-                      ...library,
-                      packages: library.packages.map((pack) => (!ref.packageId || pack.id === ref.packageId) ? {
-                        ...pack,
-                        definitions: pack.definitions.map((definition) => definition.id === ref.definitionId
-                          ? { ...definition, style: { ...definition.style, ...(ref.overrides ?? {}) } }
-                          : definition),
-                      } : pack),
-                    }));
-                    patchSelected({ component: { packageId: ref.packageId, definitionId: ref.definitionId } });
-                  }}
-                  onDetachComponent={() => {
-                    if (!selectedResolved) return;
-                    const { component: _component, ...detached } = selectedResolved;
-                    patchSelected({ ...detached, component: undefined });
-                  }}
+                  onSaveAsComponent={onSaveAsComponent}
+                  onUpdateComponent={onUpdateComponent}
+                  onDetachComponent={onDetachComponent}
                   onDelete={deleteSelected}
                   onDuplicate={duplicateSelected}
                   locked={selectedLocked}
@@ -5328,6 +4985,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   widths={widths}
                   palette={p}
                   onCover={setPromptCoverUp}
+                  onDownloadBundle={() => downloadAgentBundle(doc, effectivePrompt(resolvedDoc, widths, lang))}
                   onDoc={(patch) => {
                     if (patch.title !== undefined) setTitle(patch.title);
                     if (patch.brief !== undefined) setBrief(patch.brief);
