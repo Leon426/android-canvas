@@ -103,7 +103,7 @@ npm run dev        # http://localhost:3000
 npm run build      # ./out 에 정적 내보내기
 ```
 
-정적 사이트로 내보내는 구성입니다. 하위 경로(GitHub Pages 프로젝트 사이트 등)에서 제공하려면 빌드 시 `NEXT_PUBLIC_BASE_PATH=/저장소이름`을 지정하세요. `.github/workflows/deploy.yml`이 `main`에 push할 때마다 이를 수행해 GitHub Pages에 공개합니다.
+정적 사이트로 내보내는 구성입니다. 하위 경로(GitHub Pages 프로젝트 사이트 등)에서 제공하려면 빌드 시 `NEXT_PUBLIC_BASE_PATH=/저장소이름`을 지정하세요. `.github/workflows/deploy.yml`이 push할 때마다 이를 수행해 GitHub Pages에 공개합니다. 처음에는 Settings → Actions에서 Actions를 허용하고, Settings → Pages의 Source를 GitHub Actions로 설정하세요. 미리보기 URL: `https://<user>.github.io/<repo>/`.
 
 ## <img src="docs/readme/ui/icon-contribute.png" width="32" height="32" align="absmiddle" alt="" /> 기여
 

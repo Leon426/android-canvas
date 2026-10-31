@@ -103,7 +103,7 @@ npm run dev        # http://localhost:3000
 npm run build      # static export to ./out
 ```
 
-The app is a static Next.js export. To host it under a sub-path (for example a GitHub Pages project site), set `NEXT_PUBLIC_BASE_PATH=/your-repo` at build time. `.github/workflows/deploy.yml` does this and publishes `out/` to GitHub Pages on every push to `main`.
+The app is a static Next.js export. To host it under a sub-path (for example a GitHub Pages project site), set `NEXT_PUBLIC_BASE_PATH=/your-repo` at build time. `.github/workflows/deploy.yml` does this and publishes `out/` to GitHub Pages on every push. On a fork, allow Actions under Settings → Actions, then set Pages Source to GitHub Actions. Preview URL: `https://<user>.github.io/<repo>/`.
 
 ## <img src="docs/readme/ui/icon-contribute.png" width="32" height="32" align="absmiddle" alt="" /> Contributing
 

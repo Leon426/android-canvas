@@ -103,7 +103,7 @@ npm run dev        # http://localhost:3000
 npm run build      # 静态导出到 ./out
 ```
 
-项目以静态站点方式导出。若要部署在子路径下（例如 GitHub Pages 的项目站点），请在构建时设置 `NEXT_PUBLIC_BASE_PATH=/仓库名`。`.github/workflows/deploy.yml` 会在每次推送到 `main` 时完成这一步并发布到 GitHub Pages。
+项目以静态站点方式导出。若要部署在子路径下（例如 GitHub Pages 的项目站点），请在构建时设置 `NEXT_PUBLIC_BASE_PATH=/仓库名`。`.github/workflows/deploy.yml` 会在每次 push 后完成这一步并发布到 GitHub Pages。首次使用前请在仓库 Settings → Actions 中允许 Actions，并在 Settings → Pages 将 Source 设为 GitHub Actions。预览地址：`https://<user>.github.io/<repo>/`。
 
 ## <img src="docs/readme/ui/icon-contribute.png" width="32" height="32" align="absmiddle" alt="" /> 参与贡献
 

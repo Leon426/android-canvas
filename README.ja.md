@@ -103,7 +103,7 @@ npm run dev        # http://localhost:3000
 npm run build      # ./out に静的書き出し
 ```
 
-静的サイトとして書き出す構成です。サブパス（GitHub Pages のプロジェクトサイトなど）で配信するときはビルド時に `NEXT_PUBLIC_BASE_PATH=/リポジトリ名` を指定してください。`.github/workflows/deploy.yml` が `main` への push ごとにこれを行い、GitHub Pages に公開します。
+静的サイトとして書き出す構成です。サブパス（GitHub Pages のプロジェクトサイトなど）で配信するときはビルド時に `NEXT_PUBLIC_BASE_PATH=/リポジトリ名` を指定してください。`.github/workflows/deploy.yml` が push ごとにこれを行い、GitHub Pages に公開します。初回は Settings → Actions で Actions を許可し、Settings → Pages の Source を GitHub Actions にしてください。プレビュー URL: `https://<user>.github.io/<repo>/`。
 
 ## <img src="docs/readme/ui/icon-contribute.png" width="32" height="32" align="absmiddle" alt="" /> 貢献
 

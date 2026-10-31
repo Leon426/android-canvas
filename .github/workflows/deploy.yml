@@ -1,8 +1,12 @@
 name: Deploy to GitHub Pages
 
+# Publishes the static Next export to GitHub Pages after every push.
+# One-time repo setup (required on forks):
+#   1. Settings → Actions → General → allow Actions / workflows
+#   2. Settings → Pages → Build and deployment → Source: GitHub Actions
+# Preview URL: https://<owner>.github.io/<repo>/
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +15,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.repository }}
   cancel-in-progress: true
 
 jobs:
@@ -29,6 +33,7 @@ jobs:
         run: npm run build
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          NEXT_PUBLIC_SITE_ORIGIN: https://${{ github.repository_owner }}.github.io
       - run: touch out/.nojekyll
       - uses: actions/upload-pages-artifact@v5
         with:
