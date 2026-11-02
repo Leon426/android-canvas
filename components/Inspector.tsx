@@ -220,7 +220,8 @@ export function TransitionPicker({ value, onChange, p }: { value: Transition; on
   const lang = useLang();
   return (
     <Segmented<Transition>
-      options={TRANSITIONS.map((tr) => ({ key: tr.key, icon: tr.icon, title: TRANSITION_TEXT[lang][tr.key] }))}
+        label="Transition"
+        options={TRANSITIONS.map((tr) => ({ key: tr.key, icon: tr.icon, title: TRANSITION_TEXT[lang][tr.key] }))}
       value={value}
       onChange={onChange}
       p={p}
@@ -427,14 +428,35 @@ export function Inspector({
       <div
         style={{
           height: "100%",
-          display: "grid",
-          placeItems: "center",
-          color: p.outlineVariant,
-          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          color: p.onSurfaceVariant,
+          padding: 32,
           textAlign: "center",
+          gap: 12,
         }}
       >
-        <Icon name="ads_click" size={44} />
+        <div
+          style={{
+            width: 72,
+            height: 72,
+            borderRadius: 36,
+            background: p.surfaceContainerHigh,
+            display: "grid",
+            placeItems: "center",
+            color: p.primary,
+          }}
+        >
+          <Icon name="ads_click" size={36} />
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: p.onSurface }}>
+          {t("inspectorEmptyTitle", lang)}
+        </div>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: p.onSurfaceVariant, maxWidth: 220 }}>
+          {t("inspectorEmptyHint", lang)}
+        </div>
       </div>
     );
   }

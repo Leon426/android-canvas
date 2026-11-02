@@ -90,8 +90,10 @@ export function saveProject(doc: Doc) {
   const a = document.createElement("a");
   a.href = url;
   a.download = projectFileName(doc);
+  document.body.appendChild(a);
   a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
 /** reads a chosen file back into a document, or null when it is not one */

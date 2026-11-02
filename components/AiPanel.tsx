@@ -194,6 +194,7 @@ export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiS
                     {t("aiGetKey", lang)}
                   </a>
                 )
+<<<<<<< Updated upstream
               }
             >
               {t("aiKey", lang)}
@@ -203,6 +204,123 @@ export function AiPanel({ p, settings, onSettings }: { p: Palette; settings: AiS
           </div>
         </div>
       </div>
+=======
+              ) : (
+                <>
+                  <Input
+                    label={t("aiKey", lang)}
+                    value={draftKey}
+                    onChange={(val) => {
+                      setDraftKey(val);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && canSave) {
+                        e.preventDefault();
+                        handleSave();
+                      }
+                    }}
+                    placeholder="sk-…"
+                    p={p}
+                    type={showKey ? "text" : "password"}
+                    action={
+                      <button
+                        type="button"
+                        onClick={() => setShowKey(!showKey)}
+                        title={showKey ? t("hideKey", lang) : t("showKey", lang)}
+                        aria-label={showKey ? t("hideKey", lang) : t("showKey", lang)}
+                        className="m3-press"
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          color: p.onSurfaceVariant,
+                          cursor: "pointer",
+                          display: "grid",
+                          placeItems: "center",
+                          width: 28,
+                          height: 28,
+                          borderRadius: RADIUS.pill,
+                        }}
+                      >
+                        <Icon name={showKey ? "visibility_off" : "visibility"} size={18} />
+                      </button>
+                    }
+                  />
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                    {/* Quick paste button: icon-only pill button */}
+                    <button
+                      type="button"
+                      onClick={handlePaste}
+                      title={t("paste", lang)}
+                      aria-label={t("paste", lang)}
+                      className="m3-press"
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: RADIUS.pill,
+                        border: "none",
+                        background: pasteFeedback ? p.primary : p.secondaryContainer,
+                        color: pasteFeedback ? p.onPrimary : p.onSecondaryContainer,
+                        display: "grid",
+                        placeItems: "center",
+                        cursor: "pointer",
+                        transition: "background 160ms, color 160ms, transform 120ms",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Icon name={pasteFeedback ? "check" : "content_paste"} size={18} />
+                    </button>
+
+                    {/* Save button: disabled and dimmed when empty */}
+                    <button
+                      type="button"
+                      disabled={!canSave}
+                      onClick={handleSave}
+                      title={t("save", lang)}
+                      className="m3-press"
+                      style={{
+                        height: 36,
+                        padding: "0 18px",
+                        borderRadius: RADIUS.pill,
+                        border: "none",
+                        background: !canSave ? p.surfaceContainerHighest : p.primary,
+                        color: !canSave ? p.onSurfaceVariant : p.onPrimary,
+                        opacity: !canSave ? 0.5 : 1,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: !canSave ? "not-allowed" : "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        transition: "all 160ms",
+                      }}
+                    >
+                      <Icon name="save" size={16} />
+                      <span>{t("save", lang)}</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Security advisory and storage notice at the bottom */}
+      <div style={{ marginTop: "auto", paddingTop: 24, paddingBottom: 6, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, lineHeight: 1.4, color: p.onSurfaceVariant, background: p.surfaceContainerHigh, padding: "8px 12px", borderRadius: RADIUS.md }}>
+          <span style={{ color: p.error, flexShrink: 0, marginTop: 1 }}>
+            <Icon name="security" size={16} />
+          </span>
+          <span>{t("aiKeySecurityNotice", lang)}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, lineHeight: 1.4, color: p.onSurfaceVariant, padding: "0 4px" }}>
+          <span style={{ color: p.primary, flexShrink: 0, marginTop: 1 }}>
+            <Icon name="lock" size={16} />
+          </span>
+          <span>{t("aiKeyHint", lang)}</span>
+        </div>
+      </div>
+>>>>>>> Stashed changes
     </div>
   );
 }

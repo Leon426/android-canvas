@@ -123,10 +123,17 @@ import { GitHubLink, Mode, Toolbar } from "@/components/Toolbar";
 import { LangMenu } from "@/components/Menus";
 import { AiActionKey, AiPanel, aiErrorText } from "@/components/AiPanel";
 import { TidyState, PANEL_FADE_H } from "@/components/ui";
-import { AiSettings, DEFAULT_AI, hasKey, isSecureUrl, loadAiSettings, proposeBehavior, proposeDescription, pushHistory, saveAiSettings } from "@/lib/ai";
+import { AiSettings, DEFAULT_AI, hasKey, isSecureUrl, proposeBehavior, proposeDescription, pushHistory, saveAiSettings } from "@/lib/ai";
 import { barSlotOf, bodyRect, carryFrame, holdsEdgeBar, maxFrameLength, minFrameLength, pullInto, stretchFrame, tidyFrame } from "@/lib/tidy";
 import { constrainModalRails, modalRailOf, updateRail } from "@/lib/rail";
+import { downloadAgentBundle } from "@/lib/agentBundle";
+import { DOC_KEY } from "@/lib/localDoc";
 import { isProject, readProject, saveProject } from "@/lib/project";
+import { useComponentLibraryActions } from "@/app/editor/useComponentLibraryActions";
+import { BEFORE_KEY, useDocumentPersistence } from "@/app/editor/useDocumentPersistence";
+import { useEditorHistory } from "@/app/editor/useEditorHistory";
+import { useEditorShortcuts } from "@/app/editor/useEditorShortcuts";
+import type { Snapshot } from "@/app/editor/types";
 import { hasShareHash, readShareHash } from "@/lib/share";
 import { LoadingIndicator } from "@/components/Loading";
 import { draftDesign } from "@/lib/ai";
@@ -137,6 +144,10 @@ import { ThemeContext, ensureFontLoaded, ensureLangFontLoaded } from "@/lib/them
 import { BottomSheet, MobileActionBar, MobileInspector, MobileLang, MobileSettings } from "@/components/Mobile";
 import { ConfirmDialog, IconBtn, Segmented } from "@/components/ui";
 import { Lang, LangContext, SEED_TEXT, getLang, setGlobalLang, t, translateDefaultFrameName, translateDefaultText } from "@/lib/i18n";
+<<<<<<< Updated upstream
+=======
+import { EMPTY_COMPONENT_LIBRARY, isComponentStyleKey, OFFICIAL_PACKAGE_ID, resolveComponentInstance, resolveDocumentComponents, type ComponentLibrary } from "@/lib/componentLibrary";
+>>>>>>> Stashed changes
 
 /** the screens while a model drafts: primary, tertiary and primary container, drifting */
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -170,13 +181,6 @@ const MAX_Z = 3;
  *  toolbar's row at the top, a margin elsewhere */
 const GLIDE_TOP = 84;
 const GLIDE_PAD = 40;
-const HISTORY_MAX = 100;
-const DOC_KEY = "m3e:doc";
-/** the design a draft or a link replaced, until the author keeps or undoes it */
-const BEFORE_KEY = "m3e:doc:before";
-const DOC_LOCK = "m3e:doc:editor";
-const UI_KEY = "m3e:ui";
-
 type View = { x: number; y: number; z: number };
 type Snap = { groupId: string; index: number; pull: number };
 
@@ -234,11 +238,6 @@ type Gesture =
       moved: boolean;
     }
   | { kind: "group"; id: string; sx: number; sy: number; gx: number; gy: number; moved: boolean; overBin: boolean; guide?: Guide | null };
-
-/** everything in a document apart from its screens and parts */
-type DocMeta = Omit<Doc, "groups" | "frames">;
-/** an undo step: the screens and parts, plus the rest of the document for steps that replaced it all */
-type Snapshot = { groups: Group[]; frames: Frame[]; meta?: DocMeta };
 
 /** The parts a lone one of can be resized on the canvas itself: the controls that carry a size,
  *  and the indicators, whose width is the thing an author reaches for most. */
@@ -512,6 +511,8 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [draftBefore, setDraftBefore] = useState<Doc | null>(null);
   const draftBeforeRef = useRef<Doc | null>(null);
   draftBeforeRef.current = draftBefore;
+  /** true after a kept draft until the author undoes something, so the header's undo also sits by the opener */
+  const [quickUndo, setQuickUndo] = useState(false);
   /** true for the moment after a design arrives, so its colours ease over */
   const [revealing, setRevealing] = useState(false);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -524,6 +525,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [view, setView] = useState<View>({ x: 0, y: 0, z: 1 });
   /** Keep the server-rendered world hidden until its first fit has completed. */
   const [viewReady, setViewReady] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setViewReady(true), 50);
+    return () => clearTimeout(timer);
+  }, []);
   /** screens ease to their new place and size for a moment after one changes size */
   const [easing, setEasing] = useState(false);
   /** the canvas transform eases while the camera glides to or from a screen */
@@ -549,8 +554,11 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [drag, setDrag] = useState<DragState | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>({});
+<<<<<<< Updated upstream
   const [resizing, setResizing] = useState<"left" | "right" | null>(null);
   const [, bumpHistory] = useState(0);
+=======
+>>>>>>> Stashed changes
   /* ---------- tidy and ai ---------- */
   /** the groups before and after the last tidy; "undo" is offered only while the after-state is still current */
   const tidyRef = useRef<{ frameId: string; before: Group[]; after: Group[] } | null>(null);
@@ -609,80 +617,99 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   } | null>(null);
   /** groups that must reposition without animating on the next render */
   const instantRef = useRef<Set<string>>(new Set());
-  const loadedRef = useRef(false);
   const initialLangRef = useRef<Lang>(initialLang);
-  /** A saved document or the first viewport initialization prevents later reseeding. */
-  const hadDocRef = useRef(false);
+  const interruptPreviewRef = useRef<() => void>(() => {});
+  /* fit / doc refs are assigned once their implementations exist further down */
+  const fitRef = useRef<(animate?: boolean) => void>(() => {});
+  const docRef = useRef<Doc>(null!);
+  const showToastRef = useRef<(msg: string, ms?: number, icon?: string) => void>(() => {});
 
-  /* ---------- history ---------- */
-  const pastRef = useRef<Snapshot[]>([]);
-  const futureRef = useRef<Snapshot[]>([]);
-  const lastPatchRef = useRef<{ key: string; at: number }>({ key: "", at: 0 });
-
-  const snapshot = useCallback((withMeta = false) => {
-    lastPatchRef.current = { key: "", at: 0 };
-    setQuickUndo(false);
-    pastRef.current.push(current(withMeta));
-    if (pastRef.current.length > HISTORY_MAX) pastRef.current.shift();
-    futureRef.current = [];
-    bumpHistory((v) => v + 1);
-  }, []);
-
-  /** consecutive edits of the same field collapse into one undo step */
-  const snapshotFor = useCallback(
-    (key: string) => {
-      const now = Date.now();
-      const last = lastPatchRef.current;
-      if (last.key !== key || now - last.at > 800) snapshot();
-      lastPatchRef.current = { key, at: now };
+  const { applyDoc, loadedRef, hadDocRef } = useDocumentPersistence(
+    {
+      initialLang,
+      initialLangRef,
+      onReadyRef,
+      interruptPreviewRef,
+      fitRef,
+      framesRef,
+      migrateGroups,
+      seed,
+      seedFrames: (lang) => [{ ...SEED_FRAMES[0], name: t("home", lang) }],
+      setGroups,
+      setFrames,
+      setPaletteKey,
+      setCustomPalette,
+      setDynamicColor,
+      setTheme,
+      setTitle,
+      setBrief,
+      setPromptEdit,
+      setPromptOptions,
+      setComponentLibrary,
+      setPlatform,
+      setDraftBefore,
+      setAiSettings,
+      setView,
+      setLeftOpen,
+      setRightOpen,
+      setFavorites,
+      setMode,
+      setEditAccess,
+      setViewReady,
+      onQuotaExceeded: () => {
+        showToastRef.current(t("storageQuotaExceeded", lang), 4000, "error");
+      },
     },
-    [snapshot],
+    {
+      editAccess,
+      groups,
+      frames,
+      paletteKey,
+      frame,
+      title,
+      brief,
+      promptEdit,
+      promptOptions,
+      platform,
+      customPalette,
+      dynamicColor,
+      theme,
+      componentLibrary,
+      view,
+      leftOpen,
+      rightOpen,
+      leftW,
+      rightW,
+      favorites,
+      mode,
+      lang,
+      boot: {
+        surface: p.surface,
+        container: p.surfaceContainer,
+        low: p.surfaceContainerLow,
+        high: p.surfaceContainerHigh,
+        primary: p.primary,
+        canvas: frame === "phone" ? canvasPalette.surfaceContainerLow : "#ffffff",
+      },
+    },
   );
 
-  const restore = (snap: Snapshot) => {
-    lastPatchRef.current = { key: "", at: 0 };
-    for (const g of snap.groups) instantRef.current.add(g.id);
-    if (snap.meta) {
-      applyDoc({ ...snap.meta, groups: snap.groups, frames: snap.frames }, true);
-      if (!mobileRef.current) {
-        const mode = snap.meta.frame === "blank" ? "blank" : "phone";
-        setFrame(mode);
-        frameRef.current = mode;
-      }
-    } else {
-      setGroups(snap.groups);
-      setFrames(snap.frames);
-    }
-    bumpHistory((v) => v + 1);
-  };
-
-  /** the current step as a snapshot; `withMeta` when the step being crossed replaced the whole document */
-  const current = (withMeta: boolean): Snapshot => {
-    const { groups: _g, frames: _f, ...meta } = docRef.current;
-    return { groups: groupsRef.current, frames: framesRef.current, meta: withMeta ? meta : undefined };
-  };
-
-  const undo = useCallback(() => {
-    setQuickUndo(false);
-    const prev = pastRef.current.pop();
-    if (!prev) return;
-    futureRef.current.push(current(!!prev.meta));
-    restore(prev);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const redo = useCallback(() => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    pastRef.current.push(current(!!next.meta));
-    restore(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    instantRef.current.clear();
+  /* ---------- history ---------- */
+  const { pastRef, futureRef, lastPatchRef, snapshot, snapshotFor, undo, redo } = useEditorHistory({
+    groupsRef,
+    framesRef,
+    docRef,
+    frameRef,
+    mobileRef,
+    instantRef,
+    setGroups,
+    setFrames,
+    setFrame,
+    setQuickUndo,
+    applyDoc,
   });
 
+<<<<<<< Updated upstream
   /* ---------- persistence ---------- */
   useEffect(() => {
     /* The first tab keeps this promise pending for its lifetime. Later tabs get
@@ -925,6 +952,8 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     lang,
   ]);
 
+=======
+>>>>>>> Stashed changes
   /* ---------- measurement (text-sized kinds) ---------- */
   const allItems = useMemo(() => {
     const map = new Map<string, Item>();
@@ -1013,7 +1042,12 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     });
   }, []);
 
+<<<<<<< Updated upstream
   const fit = useCallback(() => {
+=======
+  const fit = useCallback((animate = false) => {
+    setViewReady(true);
+>>>>>>> Stashed changes
     const r = canvasRect();
     if (!r) return;
     const gs = groupsRef.current;
@@ -1071,9 +1105,47 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
       z,
     });
   }, []);
-  const fitRef = useRef(fit);
   fitRef.current = fit;
 
+<<<<<<< Updated upstream
+=======
+  /* Automatically adjust canvas viewport on container resize */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let prevW = 0;
+    let prevH = 0;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width <= 0 || height <= 0) return;
+      if (Math.abs(width - prevW) < 1 && Math.abs(height - prevH) < 1) return;
+      const hadSize = prevW > 0 && prevH > 0;
+      const dw = width - prevW;
+      const dh = height - prevH;
+      prevW = width;
+      prevH = height;
+
+      if (!hadSize) {
+        fitRef.current();
+        return;
+      }
+      if (gestureRef.current !== null || dragRef.current?.active) return;
+      // Shift viewport center by delta, preserving user's manual zoom
+      setView((cur) => ({
+        ...cur,
+        x: cur.x + dw / 2,
+        y: cur.y + dh / 2,
+      }));
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, []);
+
+>>>>>>> Stashed changes
   /* touch: two fingers pinch-zoom and pan, cancelling whatever one finger started */
   const onTouchCapture = (e: React.PointerEvent) => {
     if (e.pointerType !== "touch") return;
@@ -2181,6 +2253,55 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     }
   };
 
+<<<<<<< Updated upstream
+=======
+  /** Definition-owned style edits become explicit overrides; content and behaviour stay on the item. */
+  const patchSelectedInstance = (patch: Partial<Item>) => {
+    if (!selected?.component) {
+      patchSelected(patch);
+      return;
+    }
+    const instancePatch: Partial<Item> = {};
+    const stylePatch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(patch)) {
+      if (isComponentStyleKey(key)) {
+        /* an undefined style value must fall back to the definition, not shadow it */
+        if (value !== undefined) stylePatch[key] = value;
+      } else {
+        Object.assign(instancePatch, { [key]: value });
+      }
+    }
+    patchSelected({
+      ...patch,
+      component: {
+        ...selected.component,
+        overrides: { ...(selected.component.overrides ?? {}), ...stylePatch },
+      },
+    });
+  };
+
+  const {
+    onActivePackage,
+    onCreatePackage,
+    onRenamePackage,
+    onDeletePackage,
+    onRenameDefinition,
+    onDeleteDefinition,
+    onSaveAsComponent,
+    onUpdateComponent,
+    onDetachComponent,
+  } = useComponentLibraryActions({
+    lang,
+    componentLibrary,
+    setComponentLibrary,
+    setGroups,
+    selected,
+    selectedResolved,
+    snapshot,
+    patchSelected,
+  });
+
+>>>>>>> Stashed changes
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const ids = new Set(selectedIds);
@@ -2630,7 +2751,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     }
   };
   /** true after a kept draft until the author undoes something, so the header's undo also sits by the opener */
-  const [quickUndo, setQuickUndo] = useState(false);
   const keepDraft = () => {
     setDraftBefore(null);
     setQuickUndo(true);
@@ -2786,16 +2906,20 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
 
   const addFrame = () => {
     snapshot();
+    if (frame !== "phone") {
+      setFrame("phone");
+    }
     const base = framesRef.current[0];
     const f: Frame = {
       id: uid(),
-      name: `${t("screenN")} ${framesRef.current.length + 1}`,
+      name: `${t("screenN", lang)} ${framesRef.current.length + 1}`,
       x: nextFrameX(),
       y: base?.y ?? 0,
     };
     setFrames((fs) => [...fs, f]);
     setSelectedFrameId(f.id);
     setSelectedIds([]);
+    setViewReady(true);
     const r = canvasRect();
     if (r) {
       const z = viewRef.current.z;
@@ -2964,6 +3088,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   };
 
   const showToast = (msg: string, ms = 2200, icon = "info") => {
+    showToastRef.current = showToast;
     if (!mobileRef.current) {
       showAiNote(msg, icon, ms);
       return;
@@ -3247,7 +3372,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const z = clamp(Math.min((r.width - GLIDE_PAD * 2) / boxW, (r.height - GLIDE_TOP - GLIDE_PAD) / boxH, v.z), MIN_Z, MAX_Z);
     glide({ x: (r.width - boxW * z) / 2 - (f.x - BEZEL) * z, y: GLIDE_TOP + (r.height - GLIDE_TOP - GLIDE_PAD - boxH * z) / 2 - (f.y - BEZEL - FRAME_LABEL_H) * z, z });
   };
+  const previewFocusBeforeRef = useRef<HTMLElement | null>(null);
   const openPreview = (startId?: string | null) => {
+    previewFocusBeforeRef.current = document.activeElement as HTMLElement | null;
     if (frame !== "phone") {
       changeFrame("phone");
     }
@@ -3296,6 +3423,16 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     viewBeforePreview.current = null;
     if (back) glide(back);
   };
+  interruptPreviewRef.current = () => {
+    if (previewTimer.current !== null) abandonPreview();
+    else {
+      cancelReturn();
+      if (previewIdRef.current !== null) {
+        setPreviewId(null);
+        viewBeforePreview.current = null;
+      }
+    }
+  };
   const closePreview = () => {
     setPreviewId(null);
     const back = viewBeforePreview.current;
@@ -3304,133 +3441,36 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     if (back) returnTimer.current = { id: window.setTimeout(() => { returnTimer.current = null; glide(back); }, 220), view: back };
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Tab") tabbedRef.current = true;
-      if (editAccess !== "editable") return;
-      const t = e.target as HTMLElement;
-      const typing =
-        t &&
-        (t.tagName === "INPUT" ||
-          t.tagName === "TEXTAREA" ||
-          t.isContentEditable);
-      if (typing) return;
-      // dialogs, the preview and the prompt's full-screen cover own the keyboard while they are up
-      if (confirmClear || pendingImport !== null || shareOpen || previewId !== null || promptCoverUp) return;
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "y") {
-        e.preventDefault();
-        redo();
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "d") {
-        e.preventDefault();
-        if (selectedIds.length === 0 && selectedFrameId) duplicateFrameRef.current(selectedFrameId);
-        else duplicateSelected();
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "c") {
-        /* with nothing selected, or text highlighted somewhere, the browser keeps its own copy */
-        if (selectedIds.length === 0 || window.getSelection()?.toString()) return;
-        e.preventDefault();
-        copySelected();
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "v") {
-        if (!clipboardRef.current) return;
-        e.preventDefault();
-        pasteClipboard();
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "g") {
-        e.preventDefault();
-        if (e.shiftKey) ungroupSelected();
-        else groupSelected();
-        return;
-      }
-      /* Space presses a control reached with Tab instead of holding the hand tool; a button
-       * clicked with the mouse keeps focus too, and must not be pressed again */
-      if (e.key === " " && tabbedRef.current && t.closest?.("button, [role=button]")) return;
-      if (e.key === " " && !e.repeat) {
-        e.preventDefault();
-        setSpaceHeld(true);
-        return;
-      }
-      if (e.key === "Delete" || e.key === "Backspace") {
-        e.preventDefault();
-        if (selectedIds.length === 0 && selectedFrameId)
-          deleteFrame(selectedFrameId);
-        else deleteSelected();
-        return;
-      }
-      if (e.key === "Escape") {
-        setSelectedIds([]);
-        setSelectedFrameId(null);
-        setSelectedLinkId(null);
-        return;
-      }
-      if (e.key === "p" || e.key === "P") {
-        openPreviewRef.current();
-        return;
-      }
-      if (e.key.startsWith("Arrow")) {
-        e.preventDefault();
-        const s = e.shiftKey ? 8 : 1;
-        nudge(
-          e.key === "ArrowLeft" ? -s : e.key === "ArrowRight" ? s : 0,
-          e.key === "ArrowUp" ? -s : e.key === "ArrowDown" ? s : 0,
-        );
-        return;
-      }
-      if (mod) return;
-      if (e.key === "v" || e.key === "V") setMode("select");
-      if (e.key === "h" || e.key === "H") setMode("hand");
-      if (e.key === "=" || e.key === "+") setZoomAt(viewRef.current.z * 1.2);
-      if (e.key === "-" || e.key === "_") setZoomAt(viewRef.current.z / 1.2);
-      if (e.key === "0") fitRef.current();
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === " ") setSpaceHeld(false);
-    };
-    const onPointer = () => {
-      tabbedRef.current = false;
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("pointerdown", onPointer, true);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("pointerdown", onPointer, true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    deleteSelected,
-    duplicateSelected,
-    copySelected,
-    pasteClipboard,
-    groupSelected,
-    ungroupSelected,
-    nudge,
-    redo,
-    undo,
-    setZoomAt,
-    selectedIds,
-    selectedFrameId,
-    deleteFrame,
+  useEditorShortcuts({
+    editAccess,
     confirmClear,
     pendingImport,
     shareOpen,
     previewId,
     promptCoverUp,
-    editAccess,
-  ]);
+    selectedIds,
+    selectedFrameId,
+    undo,
+    redo,
+    duplicateSelected,
+    duplicateFrame: (id) => duplicateFrameRef.current(id),
+    copySelected,
+    pasteClipboard,
+    groupSelected,
+    ungroupSelected,
+    deleteSelected,
+    deleteFrame,
+    setSelectedIds,
+    setSelectedFrameId,
+    setSelectedLinkId,
+    openPreview: () => openPreview(),
+    nudge,
+    setMode,
+    setZoomAt,
+    currentZoom: () => viewRef.current.z,
+    fit: () => fitRef.current(),
+    setSpaceHeld,
+  });
   const openPreviewRef = useRef(openPreview);
   openPreviewRef.current = openPreview;
 
@@ -3477,7 +3517,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     [groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme],
   );
   /** the same document, for callbacks that were created on an earlier render */
-  const docRef = useRef(doc);
   docRef.current = doc;
 
   /** arrows from tappable parts to the frames they open */
@@ -4112,6 +4151,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 {leftTab === "parts" ? (
                   <PartsPalette
                     palette={p}
+<<<<<<< Updated upstream
                     favorites={favorites}
                     onToggleFavorite={(k) =>
                       setFavorites((f) =>
@@ -4120,6 +4160,14 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                     }
                     onPartPointerDown={onPartPointerDown}
                     onPartActivate={addPart}
+=======
+                    onActive={onActivePackage}
+                    onCreate={onCreatePackage}
+                    onRename={onRenamePackage}
+                    onDelete={onDeletePackage}
+                    onRenameDefinition={onRenameDefinition}
+                    onDeleteDefinition={onDeleteDefinition}
+>>>>>>> Stashed changes
                   />
                 ) : leftTab === "color" ? (
                   <ColorPanel
@@ -4829,7 +4877,15 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   frame={selectedPartFrame}
                   palette={p}
                   frames={frame === "phone" ? frames : []}
+<<<<<<< Updated upstream
                   onChange={patchSelected}
+=======
+                  onChange={patchSelectedInstance}
+                  componentLibrary={componentLibrary}
+                  onSaveAsComponent={onSaveAsComponent}
+                  onUpdateComponent={onUpdateComponent}
+                  onDetachComponent={onDetachComponent}
+>>>>>>> Stashed changes
                   onDelete={deleteSelected}
                   onDuplicate={duplicateSelected}
                   locked={selectedLocked}
@@ -4853,6 +4909,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   widths={widths}
                   palette={p}
                   onCover={setPromptCoverUp}
+                  onDownloadBundle={() => downloadAgentBundle(doc, effectivePrompt(resolvedDoc, widths, lang))}
                   onDoc={(patch) => {
                     if (patch.title !== undefined) setTitle(patch.title);
                     if (patch.brief !== undefined) setBrief(patch.brief);

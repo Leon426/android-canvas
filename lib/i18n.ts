@@ -322,6 +322,7 @@ export const UI = {
   targetAndroid: { ja: "Android のネイティブアプリとして作る", en: "Build as a native Android app", zh: "作为 Android 原生应用构建" },
   targetWeb: { ja: "ブラウザで動く Web アプリとして作る", en: "Build as a web app that runs in the browser", zh: "作为在浏览器中运行的 Web 应用构建" },
   copyPrompt: { ja: "プロンプトをコピー", en: "Copy prompt", zh: "复制提示词" },
+  downloadAgentBundle: { ja: "Agent Bundle をダウンロード", en: "Download Agent Bundle", zh: "下载 Agent Bundle" },
   // preview
   back: { ja: "戻る", en: "Back", zh: "返回" },
   close: { ja: "閉じる", en: "Close", zh: "关闭" },
@@ -485,6 +486,62 @@ export const UI = {
     en: "Could not connect. Check the URL, the network and the server's CORS settings",
     zh: "无法连接。请检查 URL、网络和服务器的 CORS 设置",
   },
+<<<<<<< Updated upstream
+=======
+  // component library & packages
+  componentLibrary: { ja: "コンポーネント", en: "Component library", zh: "组件库" },
+  officialPackage: { ja: "公式コンポーネント", en: "Official components", zh: "官方组件包" },
+  createPackage: { ja: "パッケージを作成", en: "New component package", zh: "新建组件包" },
+  emptyPackage: { ja: "このパッケージにはまだコンポーネントがありません", en: "This package has no custom components yet", zh: "这个组件包还没有自定义组件" },
+  emptyPackageHint: { ja: "キャンバス上の部品を選択し、右側から保存します。", en: "Select a part on the canvas, then save it from the inspector.", zh: "在画布中选中组件，然后使用右侧的“另存为组件”。" },
+  packageName: { ja: "パッケージ名", en: "Package name", zh: "组件包名称" },
+  newPackageName: { ja: "パッケージの新しい名前", en: "New package name", zh: "组件包新名称" },
+  packageActions: { ja: "パッケージの操作", en: "Package actions", zh: "组件包操作" },
+  deletePackageConfirm: {
+    ja: "「{name}」を削除しますか？キャンバスの部品は外見を保ったまま切り離されます。",
+    en: "Delete “{name}”? Canvas instances will keep their appearance and detach.",
+    zh: "删除“{name}”？画布实例会保留外观并脱离组件包。",
+  },
+  componentCount: { ja: "個のコンポーネント", en: "components", zh: "个组件" },
+  customPackageDefault: { ja: "カスタムパッケージ", en: "Custom package", zh: "自定义组件包" },
+  saveAsComponent: { ja: "コンポーネントとして保存", en: "Save as component", zh: "另存为组件" },
+  updateComponent: { ja: "コンポーネントを更新", en: "Update component", zh: "更新组件" },
+  detachComponent: { ja: "切り離す", en: "Detach", zh: "脱离组件" },
+  componentName: { ja: "コンポーネント名", en: "Component name", zh: "组件名称" },
+  componentActions: { ja: "コンポーネントの操作", en: "Component actions", zh: "组件操作" },
+  deleteComponentConfirm: {
+    ja: "このコンポーネントを削除しますか？キャンバスの部品は外見を保ったまま切り離されます。",
+    en: "Delete this component? Canvas instances will keep their appearance and detach.",
+    zh: "删除这个组件？画布中的实例会保留外观并脱离。",
+  },
+  save: { ja: "保存", en: "Save", zh: "保存" },
+  rename: { ja: "名前を変更", en: "Rename", zh: "重命名" },
+  create: { ja: "作成", en: "Create", zh: "创建" },
+  paste: { ja: "貼り付け", en: "Paste", zh: "粘贴" },
+  saved: { ja: "保存済み", en: "Saved", zh: "已保存" },
+    showKey: { ja: "キーを表示", en: "Show key", zh: "显示密钥" },
+  hideKey: { ja: "キーを隠す", en: "Hide key", zh: "隐藏密钥" },
+  storageQuotaExceeded: {
+    ja: "ストレージ容量が不足しているため、自動保存できませんでした。ブラウザの空き容量を確保してください。",
+    en: "Storage quota exceeded. Autosave failed. Please free up browser storage space.",
+    zh: "本地存储空间已满，自动保存失败。请清理浏览器存储空间。",
+  },
+  aiKeySecurityNotice: {
+    ja: "API キーはブラウザの localStorage に平文で保存されます。共用端末での機密キーの保存は避けてください。",
+    en: "API keys are stored in plaintext in your browser's local storage. Avoid saving sensitive keys on shared computers.",
+    zh: "API 密钥以明文保存在浏览器的本地存储中。请勿在公共或共享设备上保存敏感密钥。",
+  },
+  inspectorEmptyTitle: {
+    ja: "要素が未選択",
+    en: "No element selected",
+    zh: "未选中元素",
+  },
+  inspectorEmptyHint: {
+    ja: "キャンバス上の画面や部品をクリックすると、ここでプロパティを編集できます。",
+    en: "Click a screen or part on the canvas to edit its properties here.",
+    zh: "点击画布上的屏幕或组件即可在此编辑其属性。",
+  },
+>>>>>>> Stashed changes
 } as const satisfies Record<string, Str>;
 
 export type UIKey = keyof typeof UI;
@@ -543,8 +600,13 @@ export const KO: Record<UIKey, string> = {
   dynamicOffHint: "켜면 실제 기기는 배경화면 색상을 사용하고 여기의 색상은 대체 색상이 됩니다.", closeBtn: "닫기", screens: "화면 선택",
   noLayers: "이 화면에는 아직 부품이 없습니다", showParts: "안의 부품 표시", hideParts: "안의 부품 숨기기", lock: "잠금", unlock: "잠금 해제", lockedGroup: "잠긴 그룹입니다. 먼저 레이어 패널에서 잠금을 해제하세요", lockedKept: "잠긴 그룹의 부품은 삭제하지 않고 남겼습니다", lockedEdit: "잠금 중입니다. 스위치로 해제",
   brief: "이 앱에 대한 설명…", appName: "앱 이름", targetPlatform: "구현 대상", targetAndroid: "Android 네이티브 앱으로 만들기",
+<<<<<<< Updated upstream
   targetWeb: "브라우저에서 실행되는 웹 앱으로 만들기", copyPrompt: "프롬프트 복사", back: "뒤로", close: "닫기", cancel: "취소", ok: "확인",
   leading: "앞쪽", trailing: "뒤쪽", title: "제목", body: "본문", message: "메시지", placeholder: "자리 표시자", regular: "보통 굵기", typeBody: "본문", typeTitle: "제목", typeHeadline: "헤드라인", typeDisplay: "디스플레이", home: "홈", screenN: "화면", copySuffix: " 복사본", mobileNote: "전체 기능은 데스크톱 브라우저에서 사용할 수 있습니다",
+=======
+  targetWeb: "브라우저에서 실행되는 웹 앱으로 만들기", copyPrompt: "프롬프트 복사", downloadAgentBundle: "Agent Bundle 다운로드", back: "뒤로", close: "닫기", cancel: "취소", ok: "확인",
+  leading: "앞쪽", trailing: "뒤쪽", title: "제목", body: "본문", message: "메시지", placeholder: "자리 표시자", regular: "보통 굵기", typeBody: "본문", typeTitle: "제목", typeHeadline: "헤드라인", typeDisplay: "디스플레이", home: "홈", screenN: "화면", copySuffix: " 복사본", mobileNote: "창이 좁습니다. 창을 넓히거나 최대화하여 전체 기능을 사용하세요",
+>>>>>>> Stashed changes
   addButton: "버튼 추가", done: "완료", theme: "테마", settings: "테마 및 설정", shape: "모양", typography: "글꼴", motion: "모션",
   brightness: "밝기", light: "라이트", dark: "다크", contrast: "대비", bothModes: "둘 다", contrastStandard: "표준", contrastMedium: "중간", contrastHigh: "높음",
   design: "디자인", trigger: "트리거", noteDialog: "버튼 사양", partSpec: "이 부품의 사양", toggleLookHint: "디자인 탭에서 설정할 수 있습니다", addFrameHint: "화면을 추가하면 여기서 이동을 설정할 수 있습니다",
@@ -566,6 +628,39 @@ export const KO: Record<UIKey, string> = {
   aiSelectScreen: "먼저 화면을 선택하세요", aiNoKey: "AI 탭에 키를 입력하면 사용할 수 있습니다", aiError: "AI 요청에 실패했습니다",
   aiErrorRefusal: "모델이 답변을 거부했습니다", aiErrorJson: "모델의 응답을 읽을 수 없습니다", aiErrorLong: "답변이 너무 길어 중간에 잘렸습니다. 화면 수를 줄여 다시 시도하세요", aiErrorModel: "모델 ID를 입력하세요",
   aiErrorInsecure: "기본 URL은 https를 사용하거나 localhost를 가리켜야 합니다", aiErrorNetwork: "연결할 수 없습니다. URL, 네트워크 및 서버의 CORS 설정을 확인하세요",
+<<<<<<< Updated upstream
+=======
+  componentLibrary: "컴포넌트 라이브러리",
+  officialPackage: "공식 컴포넌트",
+  createPackage: "패키지 만들기",
+  emptyPackage: "이 패키지에는 아직 컴포넌트가 없습니다",
+  emptyPackageHint: "캔버스에서 부품을 선택한 뒤 오른쪽에서 저장하세요.",
+  packageName: "패키지 이름",
+  newPackageName: "새 패키지 이름",
+  packageActions: "패키지 작업",
+  examples: "예시",
+  loginScreen: "로그인 화면",
+  deletePackageConfirm: "‘{name}’을(를) 삭제하시겠습니까? 캔버스의 부품은 모양을 유지한 채 연결이 해제됩니다.",
+  componentCount: "개 컴포넌트",
+  customPackageDefault: "사용자 정의 패키지",
+  saveAsComponent: "컴포넌트로 저장",
+  updateComponent: "컴포넌트 업데이트",
+  detachComponent: "연결 해제",
+  componentName: "컴포넌트 이름",
+  componentActions: "컴포넌트 작업",
+  deleteComponentConfirm: "이 컴포넌트를 삭제하시겠습니까? 캔버스의 부품은 모양을 유지한 채 연결이 해제됩니다.",
+  save: "저장",
+  rename: "이름 변경",
+  create: "만들기",
+  paste: "붙여넣기",
+  saved: "저장됨",
+    showKey: "키 보기",
+  hideKey: "키 숨기기",
+  storageQuotaExceeded: "로컬 저장공간이 부족하여 자동 저장에 실패했습니다. 브라우저 저장공간을 확보해 주세요.",
+  aiKeySecurityNotice: "API 키는 브라우저의 로컬 스토리지에 일반 텍스트로 저장됩니다. 공용 기기에서 민감한 키를 저장하지 마십시오.",
+  inspectorEmptyTitle: "선택된 요소 없음",
+  inspectorEmptyHint: "캔버스의 화면이나 부품을 클릭하면 여기에서 속성을 편집할 수 있습니다.",
+>>>>>>> Stashed changes
 };
 
 /** the locale each language writes its dates in */

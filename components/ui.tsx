@@ -360,11 +360,18 @@ export function Segmented<K extends string>({
     onChange(next.key);
     (group.current?.querySelector(`[data-key="${next.key}"]`) as HTMLElement | null)?.focus();
   };
+  const computedLabel =
+    label ||
+    options
+      .map((o) => o.title || o.label || o.key)
+      .filter(Boolean)
+      .join(", ") ||
+    "Option selection";
   return (
     <div
       ref={group}
       role="radiogroup"
-      aria-label={label}
+      aria-label={computedLabel}
       onKeyDown={(e) => {
         if (e.key === "ArrowRight" || e.key === "ArrowDown") walk(e, 1);
         else if (e.key === "ArrowLeft" || e.key === "ArrowUp") walk(e, -1);

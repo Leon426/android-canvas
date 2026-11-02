@@ -338,11 +338,12 @@ export function Toolbar({
           pointerEvents: "none",
           zIndex: 40,
           flexWrap: "nowrap",
-          padding: "0 72px",
+          padding: "0 clamp(12px, 3vw, 72px)",
         }}
       >
         <Pill p={p}>
           <Segmented<Mode>
+            label={`${t("select", lang)} / ${t("hand", lang)}`}
             options={[
               {
                 key: "select",
@@ -402,6 +403,7 @@ export function Toolbar({
             onClick={onClear}
             title={t("clearAll", lang)}
             size={40}
+            danger
           />
           {onSaveProject && onOpenProject && (
             <Popover p={p} icon="folder_open" title={t("project", lang)} size={40}>

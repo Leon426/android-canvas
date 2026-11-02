@@ -205,9 +205,8 @@ export const FRAME_LABEL_H = 44;
 /** horizontal distance between newly added frames */
 export const FRAME_GAP = 120;
 
-export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-export const uid = () => Math.random().toString(36).slice(2, 10);
+import { clamp, lerp, uid } from "./math";
+export { clamp, lerp, uid };
 
 export type Radii = { tl: number; tr: number; bl: number; br: number };
 export const uniformRadii = (r: number): Radii => ({ tl: r, tr: r, bl: r, br: r });
