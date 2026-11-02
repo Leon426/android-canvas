@@ -1,3 +1,5 @@
+> **Fork note:** 이 페이지는 업스트림 [lnkiai/m3e-canvas](https://github.com/lnkiai/m3e-canvas) 의 한국어 README입니다. 컴포넌트 라이브러리를 포함한 이 포크의 설명은 [README.md](README.md)에 있습니다.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-dark.png" />

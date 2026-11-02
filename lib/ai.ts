@@ -10,11 +10,20 @@ import { Lang } from "./i18n";
 
 export type Provider = "claude" | "openai" | "gemini" | "deepseek";
 
+export type ProviderConfig = {
+  baseUrl: string;
+  model: string;
+  key: string;
+};
+
 export type AiSettings = {
   provider: Provider;
   baseUrl: string;
   model: string;
   key: string;
+  providers?: Partial<Record<Provider, ProviderConfig>>;
+  /** absent on settings saved before the choice existed: those are device-scoped */
+  keyScope?: KeyScope;
 };
 
 export const PROVIDERS: { key: Provider; label: string; baseUrl: string; model: string; keysUrl?: string }[] = [
@@ -26,39 +35,235 @@ export const PROVIDERS: { key: Provider; label: string; baseUrl: string; model: 
 
 export const providerSpec = (k: Provider) => PROVIDERS.find((p) => p.key === k) ?? PROVIDERS[0];
 
-export const DEFAULT_AI: AiSettings = { provider: PROVIDERS[0].key, baseUrl: PROVIDERS[0].baseUrl, model: PROVIDERS[0].model, key: "" };
+const defaultProvidersConfig = (): Record<Provider, ProviderConfig> => ({
+  openai: { baseUrl: PROVIDERS[0].baseUrl, model: PROVIDERS[0].model, key: "" },
+  claude: { baseUrl: PROVIDERS[1].baseUrl, model: PROVIDERS[1].model, key: "" },
+  gemini: { baseUrl: PROVIDERS[2].baseUrl, model: PROVIDERS[2].model, key: "" },
+  deepseek: { baseUrl: PROVIDERS[3].baseUrl, model: PROVIDERS[3].model, key: "" },
+});
+
+export const DEFAULT_AI: AiSettings = {
+  provider: PROVIDERS[0].key,
+  baseUrl: PROVIDERS[0].baseUrl,
+  model: PROVIDERS[0].model,
+  key: "",
+  providers: defaultProvidersConfig(),
+};
+
+/* ---------- settings persistence ---------- */
 
 const STORE_KEY = "m3e:ai";
 
-export function loadAiSettings(): AiSettings {
-  const s = { ...DEFAULT_AI };
+/** Where the API key is kept. "device" survives a restart (localStorage, the
+ *  historical behavior); "session" lives only as long as the browser session
+ *  (sessionStorage, cleared when the browser closes). Provider/model/base URL
+ *  are not secrets and always stay in localStorage. */
+export type KeyScope = "device" | "session";
+export const DEFAULT_KEY_SCOPE: KeyScope = "device";
+
+/** a key never keeps the whitespace around it; a non-string is no key at all */
+export const normalizeAiKey = (raw: unknown): string => (typeof raw === "string" ? raw.trim() : "");
+
+/** true only when the author actually entered something that is not whitespace */
+export const isValidAiKey = (raw: unknown): boolean => normalizeAiKey(raw).length > 0;
+
+/** settings saved before the scope existed are device-scoped */
+export const keyScopeOf = (s: Pick<AiSettings, "keyScope">): KeyScope => (s.keyScope === "session" ? "session" : DEFAULT_KEY_SCOPE);
+
+type StoredSettings = Partial<AiSettings> & { keys?: Partial<Record<Provider, string>> };
+
+/** the storage for a scope, or null when the browser blocks it or there is no DOM */
+function storageFor(scope: KeyScope): Storage | null {
   try {
-    const raw = localStorage.getItem(STORE_KEY);
-    if (raw) {
-      const v = JSON.parse(raw) as Partial<AiSettings>;
-      if (PROVIDERS.some((p) => p.key === v.provider)) s.provider = v.provider as Provider;
-      if (typeof v.baseUrl === "string") s.baseUrl = v.baseUrl;
-      if (typeof v.model === "string") s.model = v.model;
-      if (typeof v.key === "string") s.key = v.key;
+    const store = scope === "session" ? (typeof sessionStorage === "undefined" ? null : sessionStorage) : typeof localStorage === "undefined" ? null : localStorage;
+    return store ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function readStored(scope: KeyScope): StoredSettings | null {
+  const store = storageFor(scope);
+  if (!store) return null;
+  try {
+    const raw = store.getItem(STORE_KEY);
+    if (!raw) return null;
+    const v: unknown = JSON.parse(raw);
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as StoredSettings) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** settings with no key and no stored payload */
+const defaultSettings = (): AiSettings => ({ ...DEFAULT_AI, keyScope: DEFAULT_KEY_SCOPE, providers: defaultProvidersConfig() });
+
+function fromStored(v: StoredSettings): AiSettings {
+  const providers = defaultProvidersConfig();
+  const s: AiSettings = { ...DEFAULT_AI, keyScope: keyScopeOf(v), providers };
+  if (PROVIDERS.some((p) => p.key === v.provider)) s.provider = v.provider as Provider;
+
+  if (v.providers && typeof v.providers === "object") {
+    for (const p of PROVIDERS) {
+      const stored = v.providers[p.key];
+      if (stored) {
+        providers[p.key] = {
+          baseUrl: typeof stored.baseUrl === "string" ? stored.baseUrl : p.baseUrl,
+          model: typeof stored.model === "string" ? stored.model : p.model,
+          key: normalizeAiKey(stored.key),
+        };
+      }
     }
-  } catch {}
+  }
+
+  // An even older shape kept a flat provider->key map.
+  if (v.keys && typeof v.keys === "object") {
+    for (const p of PROVIDERS) {
+      const key = normalizeAiKey(v.keys[p.key]);
+      if (key) providers[p.key].key = key;
+    }
+  }
+
+  // Legacy fallback: if old single key existed
+  const current = providers[s.provider] || providers[PROVIDERS[0].key];
+  const legacyKey = normalizeAiKey(v.key);
+  if (legacyKey && !current.key) {
+    current.key = legacyKey;
+  }
+  if (typeof v.baseUrl === "string" && v.baseUrl) {
+    current.baseUrl = v.baseUrl;
+  }
+  if (typeof v.model === "string" && v.model) {
+    current.model = v.model;
+  }
+
+  s.baseUrl = current.baseUrl;
+  s.model = current.model;
+  s.key = current.key;
+  s.providers = providers;
   return s;
 }
 
-/** Settings live in this browser only, like the document itself. */
+export function loadAiSettings(): AiSettings {
+  const device = readStored("device");
+  const session = readStored("session");
+  const stored = device ?? session;
+  if (!stored) return defaultSettings();
+  // The long-lived copy records the scope choice; a session payload is the
+  // source of truth for keys once the author has chosen that scope. Falling
+  // back to the device copy keeps a legacy payload readable, and looking at
+  // the session copy alone still works when localStorage is blocked.
+  const scope = keyScopeOf(stored);
+  const pick = scope === "session" ? (session ?? device) : device;
+  return fromStored(pick ?? stored);
+}
+
+/** the settings with every key trimmed; the active provider's entry mirrors the flat fields */
+function normalizedSettings(s: AiSettings): AiSettings {
+  const providers: Partial<Record<Provider, ProviderConfig>> = { ...(s.providers || defaultProvidersConfig()) };
+  for (const p of PROVIDERS) {
+    const stored = providers[p.key];
+    if (stored) providers[p.key] = { ...stored, key: normalizeAiKey(stored.key) };
+  }
+  providers[s.provider] = { baseUrl: s.baseUrl, model: s.model, key: normalizeAiKey(s.key) };
+  return { ...s, key: normalizeAiKey(s.key), keyScope: keyScopeOf(s), providers };
+}
+
+/** same settings without any secret, for the copy that outlives the session */
+function withoutKeys(s: AiSettings): AiSettings {
+  const providers: Partial<Record<Provider, ProviderConfig>> = {};
+  for (const p of PROVIDERS) {
+    const stored = s.providers?.[p.key];
+    if (stored) providers[p.key] = { ...stored, key: "" };
+  }
+  return { ...s, key: "", providers };
+}
+
+/** Settings live in this browser only, like the document itself. The key is
+ *  written to the storage the chosen scope names; switching back to "device"
+ *  clears the session copy, switching to "session" strips the key out of the
+ *  long-lived copy so it cannot outlive the browser. */
 export function saveAiSettings(s: AiSettings) {
+  const scope = keyScopeOf(s);
+  const full = normalizedSettings(s);
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(s));
+    if (scope === "session") {
+      storageFor("session")?.setItem(STORE_KEY, JSON.stringify(full));
+      storageFor("device")?.setItem(STORE_KEY, JSON.stringify(withoutKeys(full)));
+    } else {
+      storageFor("device")?.setItem(STORE_KEY, JSON.stringify(full));
+      storageFor("session")?.removeItem(STORE_KEY);
+    }
   } catch {}
 }
 
-const isLocal = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(u.trim());
+/** Switch active provider while preserving each provider's independent configuration and key */
+export function switchProvider(s: AiSettings, next: Provider): AiSettings {
+  const current = s.provider;
+  const providers: Partial<Record<Provider, ProviderConfig>> = { ...(s.providers || defaultProvidersConfig()) };
+  providers[current] = {
+    baseUrl: s.baseUrl,
+    model: s.model,
+    key: s.key,
+  };
+  const spec = providerSpec(next);
+  const nextConfig = providers[next] || { baseUrl: spec.baseUrl, model: spec.model, key: "" };
+  providers[next] = nextConfig;
+
+  return {
+    ...s,
+    provider: next,
+    baseUrl: nextConfig.baseUrl,
+    model: nextConfig.model,
+    key: nextConfig.key,
+    providers,
+  };
+}
+
+/** Update the current active provider's configuration and synchronize with providers dictionary */
+export function updateProviderConfig(s: AiSettings, update: Partial<ProviderConfig>): AiSettings {
+  const nextBaseUrl = update.baseUrl !== undefined ? update.baseUrl : s.baseUrl;
+  const nextModel = update.model !== undefined ? update.model : s.model;
+  const nextKey = update.key !== undefined ? update.key : s.key;
+  const providers: Partial<Record<Provider, ProviderConfig>> = { ...(s.providers || defaultProvidersConfig()) };
+  providers[s.provider] = {
+    baseUrl: nextBaseUrl,
+    model: nextModel,
+    key: nextKey,
+  };
+  return {
+    ...s,
+    baseUrl: nextBaseUrl,
+    model: nextModel,
+    key: nextKey,
+    providers,
+  };
+}
+
+/** A URL is "local" only when its parsed host really is this machine. URLs that
+ *  carry credentials (e.g. http://127.0.0.1:8080@evil.com) point elsewhere. */
+const isLocal = (u: string) => {
+  try {
+    const url = new URL(u.trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    if (url.username || url.password) return false;
+    return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || url.hostname === "::1";
+  } catch {
+    return false;
+  }
+};
 
 /** a hosted endpoint needs a key; a server on this machine may run without one */
-export const hasKey = (s: AiSettings) => s.key.trim().length > 0 || isLocal(s.baseUrl);
+export const hasKey = (s: AiSettings) => isValidAiKey(s.key) || isLocal(s.baseUrl);
 
 /** the key must not travel over plain http, except to this machine */
-export const isSecureUrl = (u: string) => /^https:\/\//i.test(u.trim()) || isLocal(u);
+export const isSecureUrl = (u: string) => {
+  try {
+    return new URL(u.trim()).protocol === "https:" || isLocal(u);
+  } catch {
+    return false;
+  }
+};
 
 const trimSlash = (u: string) => u.trim().replace(/\/+$/, "");
 

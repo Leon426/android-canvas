@@ -1,0 +1,2 @@
+# the pre-commit hook is a POSIX shell script: it must keep LF endings even on Windows
+.githooks/* text eol=lf

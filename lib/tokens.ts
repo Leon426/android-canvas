@@ -205,8 +205,21 @@ export const FRAME_LABEL_H = 44;
 /** horizontal distance between newly added frames */
 export const FRAME_GAP = 120;
 
-import { clamp, lerp, uid } from "./math";
-export { clamp, lerp, uid };
+export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+/**
+ * Ids go into persisted documents and get cloned/duplicated a lot, so they carry real
+ * entropy: 64 random bits rather than the ~41 a `Math.random` suffix gives us.
+ */
+export const uid = (): string => {
+  const bytes = new Uint8Array(8);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+};
 
 export type Radii = { tl: number; tr: number; bl: number; br: number };
 export const uniformRadii = (r: number): Radii => ({ tl: r, tr: r, bl: r, br: r });
@@ -543,6 +556,12 @@ export function paletteOf(key: string, custom?: Palette | null, theme?: Theme): 
   const seed = base.seed ?? base.primary;
   /* a preset's hue and chroma are deliberate (Mono is nearly grey), so they are kept as they are */
   return { ...schemeFromSeed(seed, base.label, { dark: theme.dark, contrast: theme.contrast, keepChroma: base.key !== "custom" }), key: base.key };
+}
+
+/** The scheme the canvas workspace floor and dot grid render with: always standard contrast
+ *  so adjusting contrast in theme settings does not alter the canvas floor or its grid dots. */
+export function canvasPaletteOf(key: string, custom?: Palette | null, dark?: boolean): Palette {
+  return paletteOf(key, custom, { ...DEFAULT_THEME, dark: !!dark, contrast: "standard" });
 }
 
 /* ---------- contrast roles a component can take ---------- */
@@ -1629,6 +1648,8 @@ export type Item = {
   icon: string | null;
   icon2?: string | null;
   variant: Variant;
+  /** optional reusable component definition plus visual overrides for this instance */
+  component?: import("./componentLibrary").ComponentInstance;
   supporting?: string;
   size?: number;
   radiusTop?: number;
@@ -2364,6 +2385,8 @@ export type Doc = {
   promptOptions?: string[];
   /** shape, type, motion and the light / dark and contrast switches */
   theme?: Theme;
+  /** reusable author-defined components; omitted by legacy projects */
+  componentLibrary?: import("./componentLibrary").ComponentLibrary | import("./componentLibrary").ComponentLibraryV1;
 };
 
 export const defaultTabs = (): NavTab[] => NAV_TABS[getLang()].map((t) => ({ ...t }));

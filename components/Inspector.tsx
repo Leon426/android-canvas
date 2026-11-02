@@ -26,8 +26,11 @@ import { ButtonInspector } from "./ButtonInspector";
 import { PartInspector } from "./PartInspector";
 import { AlignBox, PartMenu, PlaceFn } from "./PartPanel";
 import { Icon } from "./M3Node";
-import { PanelShell, Section, Segmented } from "./ui";
+import { InputDialog, PanelShell, Section, Segmented } from "./ui";
 import { TRANSITION_TEXT, t, useLang } from "@/lib/i18n";
+import type { ComponentLibrary } from "@/lib/componentLibrary";
+
+const CUSTOMIZABLE_KINDS = new Set<Kind>(["topAppBar", "bottomNav", "fab", "extendedFab", "button", "card"]);
 
 export function variantsOf(kind: Kind): { key: Variant; label: string }[] {
   const variants = VARIANTS.map((v) => ({ ...v, label: t(v.key) }));
@@ -146,6 +149,7 @@ export function FrameSizePicker({
   compact?: boolean;
 }) {
   const lang = useLang();
+  const [promptOpen, setPromptOpen] = useState(false);
   return (
     <Segmented<FramePreset>
       options={[
@@ -220,8 +224,7 @@ export function TransitionPicker({ value, onChange, p }: { value: Transition; on
   const lang = useLang();
   return (
     <Segmented<Transition>
-        label="Transition"
-        options={TRANSITIONS.map((tr) => ({ key: tr.key, icon: tr.icon, title: TRANSITION_TEXT[lang][tr.key] }))}
+      options={TRANSITIONS.map((tr) => ({ key: tr.key, icon: tr.icon, title: TRANSITION_TEXT[lang][tr.key] }))}
       value={value}
       onChange={onChange}
       p={p}
@@ -307,7 +310,7 @@ function GroupPanel({
       }
     >
       {onPlace && (
-        <Section id="group-align" icon="grid_on" title={t("align", lang)} p={p}>
+        <Section id="group-align" icon="grid_on" title={t("align", lang)} p={p} defaultOpen>
           <AlignBox key={selectionKey} onPlace={onPlace} p={p} />
         </Section>
       )}
@@ -365,6 +368,10 @@ export function Inspector({
   allFrames,
   onShowOn,
   onShowMenu,
+  componentLibrary,
+  onSaveAsComponent,
+  onUpdateComponent,
+  onDetachComponent,
 }: {
   /** the AI button beside the behavior field */
   ai: AiHooks;
@@ -402,8 +409,13 @@ export function Inspector({
   onShowOn?: (on: boolean) => void;
   /** asks the canvas to show a FAB's menu open while it is being set up */
   onShowMenu?: (open: boolean) => void;
+  componentLibrary?: ComponentLibrary;
+  onSaveAsComponent?: (name: string) => void;
+  onUpdateComponent?: () => void;
+  onDetachComponent?: () => void;
 }) {
   const lang = useLang();
+  const [promptOpen, setPromptOpen] = useState(false);
 
   if (!item) {
     if (multi > 1) {
@@ -428,47 +440,21 @@ export function Inspector({
       <div
         style={{
           height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          color: p.onSurfaceVariant,
-          padding: 32,
+          display: "grid",
+          placeItems: "center",
+          color: p.outlineVariant,
+          padding: 24,
           textAlign: "center",
-          gap: 12,
         }}
       >
-        <div
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 36,
-            background: p.surfaceContainerHigh,
-            display: "grid",
-            placeItems: "center",
-            color: p.primary,
-          }}
-        >
-          <Icon name="ads_click" size={36} />
-        </div>
-        <div style={{ fontSize: 15, fontWeight: 600, color: p.onSurface }}>
-          {t("inspectorEmptyTitle", lang)}
-        </div>
-        <div style={{ fontSize: 13, lineHeight: 1.5, color: p.onSurfaceVariant, maxWidth: 220 }}>
-          {t("inspectorEmptyHint", lang)}
-        </div>
+        <Icon name="ads_click" size={44} />
       </div>
     );
   }
 
-  /* the parts a tap sends somewhere and that fuse into a run are edited in the button's panel */
-  if (item.kind === "button" || item.kind === "iconButton" || item.kind === "chip" || item.kind === "splitButton" || isFab(item.kind)) {
-    return <ButtonInspector ai={ai} item={item} palette={p} frame={frame ?? null} onChange={onChange} onDelete={onDelete} onDuplicate={onDuplicate} locked={locked} onToggleLock={onToggleLock} onPlace={onPlace} measured={widths?.[item.id]} selfRect={selfRect ?? null} allFrames={allFrames ?? frames} onShowOn={onShowOn} onShowMenu={onShowMenu} />;
-  }
-
-  /* everything else shares one panel, built from the button's own */
-  return (
-    <PartInspector
+  const editor = item.kind === "button" || item.kind === "iconButton" || item.kind === "chip" || item.kind === "splitButton" || isFab(item.kind)
+    ? <ButtonInspector ai={ai} item={item} palette={p} frame={frame ?? null} onChange={onChange} onDelete={onDelete} onDuplicate={onDuplicate} locked={locked} onToggleLock={onToggleLock} onPlace={onPlace} measured={widths?.[item.id]} selfRect={selfRect ?? null} allFrames={allFrames ?? frames} onShowOn={onShowOn} onShowMenu={onShowMenu} />
+    : <PartInspector
       ai={ai}
       item={item}
       palette={p}
@@ -483,6 +469,46 @@ export function Inspector({
       allFrames={allFrames ?? frames}
       measured={widths?.[item.id]}
       railStandalone={railStandalone}
-    />
+    />;
+
+  if (!CUSTOMIZABLE_KINDS.has(item.kind) || !onSaveAsComponent) return editor;
+
+  const definition = item.component ? componentLibrary?.packages
+    .find((pack) => !item.component?.packageId || pack.id === item.component.packageId)
+    ?.definitions.find((entry) => entry.id === item.component?.definitionId) : undefined;
+  const buttonStyle = { border: "none", borderRadius: 18, padding: "8px 12px", background: p.surfaceContainerHigh, color: p.onSurface, cursor: "pointer", font: "inherit", fontSize: 12 } as const;
+
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 6, borderBottom: `1px solid ${p.outlineVariant}` }}>
+        <Icon name="deployed_code" size={18} />
+        {definition ? (
+          <>
+            <span title={definition.name} style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 650 }}>{definition.name}</span>
+            <button style={buttonStyle} onClick={onUpdateComponent}>{t("updateComponent", lang)}</button>
+            <button style={buttonStyle} onClick={onDetachComponent}>{t("detachComponent", lang)}</button>
+          </>
+        ) : (
+          <>
+            <button style={{ ...buttonStyle, width: "100%" }} onClick={() => setPromptOpen(true)}>
+              {t("saveAsComponent", lang)}
+            </button>
+            <InputDialog
+              open={promptOpen}
+              title={t("saveAsComponent", lang)}
+              placeholder={t("componentName", lang)}
+              initialValue={item.label || item.kind}
+              palette={p}
+              onCancel={() => setPromptOpen(false)}
+              onConfirm={(name) => {
+                setPromptOpen(false);
+                onSaveAsComponent(name);
+              }}
+            />
+          </>
+        )}
+      </div>
+      <div style={{ flex: 1, minHeight: 0 }}>{editor}</div>
+    </div>
   );
 }

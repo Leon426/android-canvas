@@ -10,7 +10,7 @@ import { t, useLang } from "@/lib/i18n";
 
 export type Mode = "select" | "hand";
 
-const REPO_URL = "https://github.com/lnkiai/m3e-canvas";
+const REPO_URL = "https://github.com/Leon426/android-canvas";
 
 export function GitHubLink({ p, size = 40 }: { p: Palette; size?: number }) {
   return (
@@ -338,12 +338,11 @@ export function Toolbar({
           pointerEvents: "none",
           zIndex: 40,
           flexWrap: "nowrap",
-          padding: "0 clamp(12px, 3vw, 72px)",
+          padding: "0 72px",
         }}
       >
         <Pill p={p}>
           <Segmented<Mode>
-            label={`${t("select", lang)} / ${t("hand", lang)}`}
             options={[
               {
                 key: "select",
@@ -403,7 +402,6 @@ export function Toolbar({
             onClick={onClear}
             title={t("clearAll", lang)}
             size={40}
-            danger
           />
           {onSaveProject && onOpenProject && (
             <Popover p={p} icon="folder_open" title={t("project", lang)} size={40}>

@@ -51,8 +51,6 @@ export function downloadAgentBundle(doc: Doc, prompt: string): void {
   const a = document.createElement("a");
   a.href = url;
   a.download = agentBundleFileName(doc);
-  document.body.appendChild(a);
   a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 100);
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

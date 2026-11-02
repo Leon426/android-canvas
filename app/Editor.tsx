@@ -59,6 +59,7 @@ import {
   FRAME_LABEL_H,
   FrameMode,
   frameOfGroup,
+  groupsInFrame,
   framePresetPatch,
   frameRadius,
   frameRect,
@@ -89,6 +90,7 @@ import {
   NAV_BAR_H,
   Palette,
   paletteOf,
+  canvasPaletteOf,
   PHONE_H,
   PHONE_MARGIN,
   PHONE_W,
@@ -130,9 +132,8 @@ import { downloadAgentBundle } from "@/lib/agentBundle";
 import { DOC_KEY } from "@/lib/localDoc";
 import { isProject, readProject, saveProject } from "@/lib/project";
 import { useComponentLibraryActions } from "@/app/editor/useComponentLibraryActions";
-import { BEFORE_KEY, useDocumentPersistence } from "@/app/editor/useDocumentPersistence";
+import { BEFORE_KEY, UI_KEY, useDocumentPersistence } from "@/app/editor/useDocumentPersistence";
 import { useEditorHistory } from "@/app/editor/useEditorHistory";
-import { useEditorShortcuts } from "@/app/editor/useEditorShortcuts";
 import type { Snapshot } from "@/app/editor/types";
 import { hasShareHash, readShareHash } from "@/lib/share";
 import { LoadingIndicator } from "@/components/Loading";
@@ -143,11 +144,10 @@ import { MotionPanel, ShapePanel, TypePanel } from "@/components/ThemePanel";
 import { ThemeContext, ensureFontLoaded, ensureLangFontLoaded } from "@/lib/theme";
 import { BottomSheet, MobileActionBar, MobileInspector, MobileLang, MobileSettings } from "@/components/Mobile";
 import { ConfirmDialog, IconBtn, Segmented } from "@/components/ui";
+import { createLoginTemplateGroups } from "@/lib/exampleTemplates";
+import { ComponentLibraryPanel, ComponentPackagePicker } from "@/components/ComponentLibraryPanel";
 import { Lang, LangContext, SEED_TEXT, getLang, setGlobalLang, t, translateDefaultFrameName, translateDefaultText } from "@/lib/i18n";
-<<<<<<< Updated upstream
-=======
 import { EMPTY_COMPONENT_LIBRARY, isComponentStyleKey, OFFICIAL_PACKAGE_ID, resolveComponentInstance, resolveDocumentComponents, type ComponentLibrary } from "@/lib/componentLibrary";
->>>>>>> Stashed changes
 
 /** the screens while a model drafts: primary, tertiary and primary container, drifting */
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
@@ -215,6 +215,7 @@ type DragState = {
   settling: boolean;
   /** let go where it cannot land: the ghost shrinks away before the state is cleared */
   vanishing: boolean;
+  templateId?: string;
 };
 
 type Gesture =
@@ -438,10 +439,11 @@ function ThinkingRing({ p, frame }: { p: Palette; frame: Frame }) {
   );
 }
 
-type LeftTab = "parts" | "layers" | "color" | "shape" | "type" | "motion" | "ai";
+type LeftTab = "parts" | "library" | "layers" | "color" | "shape" | "type" | "motion" | "ai";
 /** the left rail: parts and layers, then the four theme axes of the whole design */
-const LEFT_TABS: { key: LeftTab; icon: string; title: "parts" | "layers" | "colors" | "shape" | "typography" | "motion" | "ai" }[] = [
+const LEFT_TABS: { key: LeftTab; icon: string; title: "parts" | "componentLibrary" | "layers" | "colors" | "shape" | "typography" | "motion" | "ai" }[] = [
   { key: "parts", icon: "add_box", title: "parts" },
+  { key: "library", icon: "deployed_code", title: "componentLibrary" },
   { key: "layers", icon: "layers", title: "layers" },
   { key: "color", icon: "palette", title: "colors" },
   { key: "shape", icon: "rounded_corner", title: "shape" },
@@ -451,6 +453,7 @@ const LEFT_TABS: { key: LeftTab; icon: string; title: "parts" | "layers" | "colo
 ];
 
 export default function Editor({ initialLang, onReady }: { initialLang: Lang; onReady?: () => void }) {
+  const reducedMotion = useReducedMotion();
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   /* ---------- document ---------- */
@@ -496,6 +499,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [brief, setBrief] = useState("");
   const [promptEdit, setPromptEdit] = useState<string | undefined>(undefined);
   const [promptOptions, setPromptOptions] = useState<string[] | undefined>(undefined);
+  const [componentLibrary, setComponentLibrary] = useState<ComponentLibrary>(EMPTY_COMPONENT_LIBRARY);
   /** the prompt's full-screen cover is up: the panel's own band steps aside while it is */
   const [promptCoverUp, setPromptCoverUp] = useState(false);
   /** the author's explicit target; null follows the screens (web once a desktop screen exists) */
@@ -525,10 +529,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [view, setView] = useState<View>({ x: 0, y: 0, z: 1 });
   /** Keep the server-rendered world hidden until its first fit has completed. */
   const [viewReady, setViewReady] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setViewReady(true), 50);
-    return () => clearTimeout(timer);
-  }, []);
   /** screens ease to their new place and size for a moment after one changes size */
   const [easing, setEasing] = useState(false);
   /** the canvas transform eases while the camera glides to or from a screen */
@@ -537,13 +537,23 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-  const [leftW, setLeftW] = useState(RAIL_W + 268);
+  const leftW = RAIL_W + 244;
   const [leftTab, setLeftTab] = useState<LeftTab>("parts");
+  const titleMeasureRef = useRef<HTMLSpanElement>(null);
+  const tabTitle = t(LEFT_TABS.find((x) => x.key === leftTab)?.title ?? "parts", lang);
+  const [pillWidth, setPillWidth] = useState<number>(() => (leftTab === "library" ? 64 : 50));
+  useEffect(() => {
+    if (titleMeasureRef.current) {
+      setPillWidth(Math.round(titleMeasureRef.current.offsetWidth + 24));
+    } else {
+      setPillWidth(leftTab === "library" ? 64 : 50);
+    }
+  }, [tabTitle, leftTab]);
   /** pointer over the collapsed rail: the logo becomes the open button */
   const [railHover, setRailHover] = useState(false);
   /** the screen whose layers are listed when nothing on a screen is selected */
   const [layersFrameId, setLayersFrameId] = useState<string | null>(null);
-  const [rightW, setRightW] = useState(320);
+  const rightW = 280;
   const [rightTab, setRightTab] = useState<"edit" | "prompt">("edit");
   const [favorites, setFavorites] = useState<Kind[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -554,11 +564,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [drag, setDrag] = useState<DragState | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>({});
-<<<<<<< Updated upstream
-  const [resizing, setResizing] = useState<"left" | "right" | null>(null);
-  const [, bumpHistory] = useState(0);
-=======
->>>>>>> Stashed changes
   /* ---------- tidy and ai ---------- */
   /** the groups before and after the last tidy; "undo" is offered only while the after-state is still current */
   const tidyRef = useRef<{ frameId: string; before: Group[]; after: Group[] } | null>(null);
@@ -573,6 +578,11 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const aiAbortRef = useRef<AbortController | null>(null);
 
   const p = useMemo(() => paletteOf(paletteKey, customPalette, theme), [paletteKey, customPalette, theme]);
+  /** The canvas background and dot grid keep standard contrast so adjusting contrast doesn't affect the workspace. */
+  const canvasPalette = useMemo(
+    () => canvasPaletteOf(paletteKey, customPalette, theme.dark),
+    [paletteKey, customPalette, theme.dark],
+  );
   /* corner helpers read the shape scale outside React; keep it current before anything renders */
   setGlobalShape(theme.shape);
 
@@ -583,6 +593,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const pendingRef = useRef<{ timer: number; commit: () => void } | null>(null);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  const resolvedGroupsRef = useRef<Group[]>(groups);
   const framesRef = useRef(frames);
   framesRef.current = frames;
   const widthsRef = useRef(widths);
@@ -619,10 +630,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const instantRef = useRef<Set<string>>(new Set());
   const initialLangRef = useRef<Lang>(initialLang);
   const interruptPreviewRef = useRef<() => void>(() => {});
-  /* fit / doc refs are assigned once their implementations exist further down */
+  /* fit / doc / ensureFrame refs are assigned once their implementations exist further down */
   const fitRef = useRef<(animate?: boolean) => void>(() => {});
+  const ensureFrameRef = useRef<() => void>(() => {});
   const docRef = useRef<Doc>(null!);
-  const showToastRef = useRef<(msg: string, ms?: number, icon?: string) => void>(() => {});
 
   const { applyDoc, loadedRef, hadDocRef } = useDocumentPersistence(
     {
@@ -655,10 +666,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
       setFavorites,
       setMode,
       setEditAccess,
-      setViewReady,
-      onQuotaExceeded: () => {
-        showToastRef.current(t("storageQuotaExceeded", lang), 4000, "error");
-      },
     },
     {
       editAccess,
@@ -709,126 +716,50 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     applyDoc,
   });
 
-<<<<<<< Updated upstream
-  /* ---------- persistence ---------- */
-  useEffect(() => {
-    /* The first tab keeps this promise pending for its lifetime. Later tabs get
-       `null` immediately and stay read-only until they are reloaded. Where the
-       browser has no locks (an insecure origin, an old WebKit) the editor works
-       as it always did, without the guard. */
-    if (!navigator.locks) {
-      setEditAccess("editable");
+  /* ---------- measurement (text-sized kinds) ---------- */
+  const allItems = useMemo(() => {
+    const map = new Map<string, Item>();
+    for (const g of groups) for (const it of g.items) map.set(it.id, it);
+    if (drag) map.set(drag.item.id, drag.item);
+    return [...map.values()];
+  }, [groups, drag]);
+
+  /** a FAB whose size the author just changed, and the corner it is to keep. A part as wide as
+   *  its own label is only measured after it is drawn, so the corner is put right once the
+   *  measuring pass knows how wide it came out. */
+  const fabAnchor = useRef<{ id: string; right: number; bottom: number } | null>(null);
+  useLayoutEffect(() => {
+    const next: Record<string, number> = {};
+    measureEls.current.forEach((el, id) => {
+      next[id] = Math.ceil(el.getBoundingClientRect().width);
+    });
+    const keys = Object.keys(next);
+    const changed =
+      keys.length !== Object.keys(widthsRef.current).length ||
+      keys.some((k) => widthsRef.current[k] !== next[k]);
+    if (changed) setWidths(next);
+    const anchor = fabAnchor.current;
+    if (!anchor) return;
+    const g = groupsRef.current.find((x) => x.items.some((it) => it.id === anchor.id));
+    const item = g?.items.find((it) => it.id === anchor.id);
+    if (!g || !item) {
+      fabAnchor.current = null;
       return;
     }
-    let active = true;
-    let releaseLock: (() => void) | undefined;
-    /* Wait until React has finished its development-only effect replay. This
-       prevents the discarded setup from briefly competing with the real one. */
-    queueMicrotask(() => {
-      if (!active) return;
-      void navigator.locks
-        .request(DOC_LOCK, { ifAvailable: true }, async (lock) => {
-          if (!active) return;
-          if (!lock) {
-            setEditAccess("readonly");
-            return;
-          }
-          setEditAccess("editable");
-          await new Promise<void>((resolve) => {
-            releaseLock = resolve;
-          });
-        })
-        .catch(() => {
-          if (active) setEditAccess("editable");
-        });
-    });
-    return () => {
-      active = false;
-      releaseLock?.();
-    };
-  }, []);
-
-  /** Puts a stored or opened document into the editor. Fields a partial document
-   *  leaves out keep their current value, or go back to the default when `reset`. */
-  const applyDoc = (doc: Partial<Doc>, reset: boolean) => {
-    // A document can arrive during the opening glide, before previewId is set. The
-    // screen the glide was heading for belongs to the replaced document, so the pending
-    // opening is dropped and the camera returns; an open preview simply closes.
-    if (previewTimer.current !== null) abandonPreview();
-    else {
-      /* a return still on its way would drag the camera off the new document's fit */
-      cancelReturn();
-      if (previewIdRef.current !== null) {
-        setPreviewId(null);
-        viewBeforePreview.current = null;
-      }
-    }
-    const frames = Array.isArray(doc.frames) ? doc.frames : framesRef.current;
-    if (Array.isArray(doc.groups)) setGroups(migrateGroups(doc.groups, frames));
-    if (Array.isArray(doc.frames)) setFrames(doc.frames);
-    if (typeof doc.paletteKey === "string" && doc.paletteKey) setPaletteKey(doc.paletteKey);
-    else if (reset) setPaletteKey("purple");
-    /* normalize once so a scheme saved before the secondary role gets it and keeps it on re-save */
-    if (doc.customPalette && typeof doc.customPalette.primary === "string") setCustomPalette(paletteOf("custom", doc.customPalette));
-    else if (reset) setCustomPalette(null);
-    if (typeof doc.dynamicColor === "boolean") setDynamicColor(doc.dynamicColor);
-    else if (reset) setDynamicColor(false);
-    if (doc.theme && typeof doc.theme === "object") setTheme(normalizeTheme(doc.theme));
-    else if (reset) setTheme(normalizeTheme(undefined));
-    if (typeof doc.title === "string") setTitle(doc.title);
-    else if (reset) setTitle("");
-    if (typeof doc.brief === "string") setBrief(doc.brief);
-    else if (reset) setBrief("");
-    if (typeof doc.promptEdit === "string") setPromptEdit(doc.promptEdit);
-    else if (reset) setPromptEdit(undefined);
-    if (Array.isArray(doc.promptOptions)) setPromptOptions(doc.promptOptions);
-    else if (reset) setPromptOptions(undefined);
-    if (isPlatform(doc.platform)) setPlatform(doc.platform);
-    else if (reset) setPlatform(null);
-  };
+    const sz = sizeOf(item, next);
+    const dx = anchor.right - (g.x + sz.w);
+    const dy = anchor.bottom - (g.y + sz.h);
+    fabAnchor.current = null;
+    if (!dx && !dy) return;
+    instantRef.current.add(g.id);
+    setGroups((prev) => prev.map((x) => (x.id === g.id ? { ...x, x: x.x + dx, y: x.y + dy } : x)));
+  });
 
   useEffect(() => {
-    // React's development double-run would otherwise read back its own first save
-    if (loadedRef.current) return;
-    try {
-      const d = localStorage.getItem(DOC_KEY);
-      if (d) {
-        hadDocRef.current = true;
-        applyDoc(JSON.parse(d) as Partial<Doc>, false);
-        // frame mode is decided by the device (media-query effect), not restored
-      }
-      const before = d ? localStorage.getItem(BEFORE_KEY) : null;
-      if (!d) localStorage.removeItem(BEFORE_KEY);
-      if (before) {
-        const value: unknown = JSON.parse(before);
-        if (isProject(value)) setDraftBefore(value);
-        else localStorage.removeItem(BEFORE_KEY);
-      }
-      const u = localStorage.getItem(UI_KEY);
-      if (u) {
-        const ui = JSON.parse(u);
-        if (ui.view) setView(ui.view);
-        if (typeof ui.leftOpen === "boolean") setLeftOpen(ui.leftOpen);
-        if (typeof ui.rightOpen === "boolean") setRightOpen(ui.rightOpen);
-        if (ui.leftW) setLeftW(Math.max(RAIL_W + 244, ui.leftW));
-        if (ui.rightW) setRightW(ui.rightW);
-        if (Array.isArray(ui.favorites)) setFavorites(ui.favorites);
-        if (ui.mode) setMode(ui.mode);
-      } else {
-        queueMicrotask(() => fitRef.current());
-      }
-      setGlobalLang(initialLang);
-      initialLangRef.current = initialLang;
-      if (!d) {
-        setGroups(seed(initialLang));
-        setFrames([{ ...SEED_FRAMES[0], name: t("home", initialLang) }]);
-      }
-    } catch {}
-    setAiSettings(loadAiSettings());
-    loadedRef.current = true;
-    /* the document is in state; one frame later it is on screen and the boot overlay may go.
-       Not cancelled on cleanup: the development double-run skips this effect the second time. */
-    requestAnimationFrame(() => onReadyRef.current?.());
+    const refreshWidths = () => setWidths({});
+    document.fonts?.ready.then(refreshWidths);
+    document.fonts?.addEventListener("loadingdone", refreshWidths);
+    return () => document.fonts?.removeEventListener("loadingdone", refreshWidths);
   }, []);
 
   useEffect(() => {
@@ -876,13 +807,44 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     };
   }, []);
 
-  /* everyone works on phone screens; a phone gets one fixed screen and the select tool only */
+  /* everyone works on phone screens; a phone gets one fixed screen and the select tool only.
+     This effect also reveals the canvas after the first fit — without setViewReady the
+     world stays visibility:hidden forever. */
   useEffect(() => {
-    const mq = window.matchMedia(
-      "(max-width: 840px), (pointer: coarse) and (max-width: 1024px)",
-    );
+    const mqFine = window.matchMedia("(pointer: fine)");
+    const mqCoarse = window.matchMedia("(pointer: coarse)");
+    let prevW = window.innerWidth;
+
+    // Initial check on mount: if on desktop in split-screen (< 960px) and no explicit saved UI, collapse right sidebar
+    if (mqFine.matches && window.innerWidth < 960) {
+      try {
+        const u = localStorage.getItem(UI_KEY);
+        if (!u || typeof JSON.parse(u)?.rightOpen !== "boolean") {
+          setRightOpen(false);
+        }
+      } catch {}
+    }
+
+    const computeIsMobile = () => {
+      const isFine = mqFine.matches;
+      // For desktop (mouse/trackpad): do not treat as mobile even when split-screen (e.g. 640px~960px).
+      // Only treat as mobile if window is extremely narrow (< 640px).
+      if (isFine) {
+        return window.innerWidth < 640;
+      }
+      // For touch-only devices: mobile breakpoint lowered to 640px (phones) or coarse pointer <= 768px.
+      return window.innerWidth < 640 || (mqCoarse.matches && window.innerWidth <= 768);
+    };
+
     const apply = () => {
-      const m = mq.matches;
+      const w = window.innerWidth;
+      // Auto-collapse right panel if desktop window is resized below 960px to preserve canvas room
+      if (mqFine.matches && w < 960 && prevW >= 960) {
+        setRightOpen(false);
+      }
+      prevW = w;
+
+      const m = computeIsMobile();
       setIsMobile(m);
       mobileRef.current = m;
       if (m) {
@@ -906,98 +868,14 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
       });
     };
     apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
-
-  useEffect(() => {
-    if (!loadedRef.current || editAccess !== "editable") return;
-    try {
-      localStorage.setItem(
-        DOC_KEY,
-        JSON.stringify({ groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform: platform ?? undefined, customPalette: customPalette ?? undefined, dynamicColor, theme }),
-      );
-    } catch {}
-  }, [editAccess, groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme]);
-
-  useEffect(() => {
-    if (!loadedRef.current) return;
-    try {
-      localStorage.setItem(
-        UI_KEY,
-        JSON.stringify({
-          view,
-          leftOpen,
-          rightOpen,
-          leftW,
-          rightW,
-          favorites,
-          mode,
-          lang,
-          /* the theme's surfaces, so the shell drawn before the editor loads is already this colour */
-          boot: { surface: p.surface, container: p.surfaceContainer, low: p.surfaceContainerLow, high: p.surfaceContainerHigh, primary: p.primary, canvas: frame === "phone" ? p.surfaceContainerLow : "#ffffff" },
-        }),
-      );
-    } catch {}
-  }, [
-    view,
-    leftOpen,
-    rightOpen,
-    leftW,
-    rightW,
-    p,
-    frame,
-    favorites,
-    mode,
-    lang,
-  ]);
-
-=======
->>>>>>> Stashed changes
-  /* ---------- measurement (text-sized kinds) ---------- */
-  const allItems = useMemo(() => {
-    const map = new Map<string, Item>();
-    for (const g of groups) for (const it of g.items) map.set(it.id, it);
-    if (drag) map.set(drag.item.id, drag.item);
-    return [...map.values()];
-  }, [groups, drag]);
-
-  /** a FAB whose size the author just changed, and the corner it is to keep. A part as wide as
-   *  its own label is only measured after it is drawn, so the corner is put right once the
-   *  measuring pass knows how wide it came out. */
-  const fabAnchor = useRef<{ id: string; right: number; bottom: number } | null>(null);
-  useLayoutEffect(() => {
-    const next: Record<string, number> = {};
-    measureEls.current.forEach((el, id) => {
-      next[id] = Math.ceil(el.getBoundingClientRect().width);
-    });
-    const keys = Object.keys(next);
-    const changed =
-      keys.length !== Object.keys(widthsRef.current).length ||
-      keys.some((k) => widthsRef.current[k] !== next[k]);
-    if (changed) setWidths(next);
-    const anchor = fabAnchor.current;
-    if (!anchor) return;
-    const g = groupsRef.current.find((x) => x.items.some((it) => it.id === anchor.id));
-    const item = g?.items.find((it) => it.id === anchor.id);
-    if (!g || !item) {
-      fabAnchor.current = null;
-      return;
-    }
-    const sz = sizeOf(item, next);
-    const dx = anchor.right - (g.x + sz.w);
-    const dy = anchor.bottom - (g.y + sz.h);
-    fabAnchor.current = null;
-    if (!dx && !dy) return;
-    instantRef.current.add(g.id);
-    setGroups((prev) => prev.map((x) => (x.id === g.id ? { ...x, x: x.x + dx, y: x.y + dy } : x)));
-  });
-
-  useEffect(() => {
-    const refreshWidths = () => setWidths({});
-    document.fonts?.ready.then(refreshWidths);
-    document.fonts?.addEventListener("loadingdone", refreshWidths);
-    return () => document.fonts?.removeEventListener("loadingdone", refreshWidths);
+    window.addEventListener("resize", apply);
+    mqFine.addEventListener("change", apply);
+    mqCoarse.addEventListener("change", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      mqFine.removeEventListener("change", apply);
+      mqCoarse.removeEventListener("change", apply);
+    };
   }, []);
 
   const sizeRef = useCallback((it: Item) => sizeOf(it, widthsRef.current), []);
@@ -1042,14 +920,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     });
   }, []);
 
-<<<<<<< Updated upstream
-  const fit = useCallback(() => {
-=======
   const fit = useCallback((animate = false) => {
-    setViewReady(true);
->>>>>>> Stashed changes
     const r = canvasRect();
-    if (!r) return;
+    if (!r || r.width <= 0 || r.height <= 0) return;
     const gs = groupsRef.current;
     let x0 = -BEZEL;
     let y0 = -BEZEL - FRAME_LABEL_H;
@@ -1084,31 +957,37 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const pad = mobile ? 14 : 40;
     const top = mobile ? 96 : 84; // keep the floating toolbar clear of the frame
     const bottom = mobile ? 96 : pad;
+    let nextView: View;
     if (mobile) {
       // a phone zooms to the screen's width and starts at its top; the rest scrolls
       const z = clamp((r.width - pad * 2) / (x1 - x0), MIN_Z, MAX_Z);
-      setView({ x: (r.width - (x1 - x0) * z) / 2 - x0 * z, y: top - y0 * z, z });
-      return;
+      nextView = { x: (r.width - (x1 - x0) * z) / 2 - x0 * z, y: top - y0 * z, z };
+    } else {
+      const z = clamp(
+        Math.min(
+          (r.width - pad * 2) / (x1 - x0),
+          (r.height - top - bottom) / (y1 - y0),
+          1,
+        ),
+        MIN_Z,
+        MAX_Z,
+      );
+      nextView = {
+        x: (r.width - (x1 - x0) * z) / 2 - x0 * z,
+        y: top + (r.height - top - bottom - (y1 - y0) * z) / 2 - y0 * z,
+        z,
+      };
     }
-    const z = clamp(
-      Math.min(
-        (r.width - pad * 2) / (x1 - x0),
-        (r.height - top - bottom) / (y1 - y0),
-        1,
-      ),
-      MIN_Z,
-      MAX_Z,
-    );
-    setView({
-      x: (r.width - (x1 - x0) * z) / 2 - x0 * z,
-      y: top + (r.height - top - bottom - (y1 - y0) * z) / 2 - y0 * z,
-      z,
-    });
+    if (animate) {
+      setCameraEasing(true);
+      setView(nextView);
+      window.setTimeout(() => setCameraEasing(false), SETTLE_MS + 40);
+    } else {
+      setView(nextView);
+    }
   }, []);
   fitRef.current = fit;
 
-<<<<<<< Updated upstream
-=======
   /* Automatically adjust canvas viewport on container resize */
   useEffect(() => {
     const el = canvasRef.current;
@@ -1145,7 +1024,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     };
   }, []);
 
->>>>>>> Stashed changes
   /* touch: two fingers pinch-zoom and pan, cancelling whatever one finger started */
   const onTouchCapture = (e: React.PointerEvent) => {
     if (e.pointerType !== "touch") return;
@@ -1452,6 +1330,53 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     setDrag({ ...d });
   };
 
+  const onExamplePointerDown = (e: React.PointerEvent, templateId: string) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    flushPending();
+    const item: Item = {
+      ...makeItem("box"),
+      id: uid(),
+      label: t("loginScreen", lang),
+      size: 160,
+      size2: 240,
+      radiusTop: 16,
+      radiusBottom: 16,
+      fill: "inverseSurface",
+    };
+    const pt = toWorld(e.clientX, e.clientY);
+    const offX = 80;
+    const offY = 120;
+    sx.jump(pt.x - offX);
+    sy.jump(pt.y - offY);
+    setSelectedIds([item.id]);
+    setRightTab("edit");
+    setDragLit({ x: offX, y: offY, at: performance.now() });
+    const d: DragState = {
+      item,
+      base: item,
+      baseOffX: offX,
+      baseOffY: offY,
+      offX,
+      offY,
+      startX: pt.x,
+      startY: pt.y,
+      px: pt.x,
+      py: pt.y,
+      active: true,
+      fromPalette: true,
+      overBin: false,
+      snap: null,
+      settling: false,
+      vanishing: false,
+      guide: null,
+      templateId,
+    };
+    dragRef.current = d;
+    setDrag({ ...d });
+  };
+
   /** The group a new part becomes when it lands with its top-left at rawX/rawY, on the screen
    *  under its centre if there is one. A bar spans that screen beside its rail; any other part
    *  keeps its phone-sized default (a list or a field as wide as a desktop is rarely what the
@@ -1616,7 +1541,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const d = sizeDragSpec(item, side, frameOfGroup(g, framesRef.current, widthsRef.current) ?? null);
     const v = clamp(Math.round(d.startV / 4) * 4 + dir * 4, d.min, d.max);
     if (v === d.startV) return;
-    patchSelected(sizePatch(item, d, v));
+    patchSelectedInstance(sizePatch(item, d, v));
   };
   /* a drag that outlives the editor leaves nothing listening behind it */
   const widthDragEnd = useRef<(() => void) | null>(null);
@@ -1680,7 +1605,25 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             ? gr
             : {
                 ...gr,
-                items: gr.items.map((it) => (it.id !== d.id ? it : { ...it, ...sizePatch(it, d, v) })),
+                items: gr.items.map((it) => {
+                  if (it.id !== d.id) return it;
+                  const patch = sizePatch(it, d, v);
+                  if (it.component) {
+                    const stylePatch: Record<string, unknown> = {};
+                    for (const [k, val] of Object.entries(patch)) {
+                      if (isComponentStyleKey(k)) stylePatch[k] = val;
+                    }
+                    return {
+                      ...it,
+                      ...patch,
+                      component: {
+                        ...it.component,
+                        overrides: { ...(it.component.overrides ?? {}), ...stylePatch },
+                      },
+                    };
+                  }
+                  return { ...it, ...patch };
+                }),
               },
         ),
       );
@@ -1875,6 +1818,51 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
         vanishDrag(d);
         return;
       }
+      if (d.templateId === "login") {
+        snapshot();
+        const emptyFrame = framesRef.current.find(
+          (f) => groupsInFrame(groupsRef.current, f, framesRef.current, widthsRef.current).length === 0,
+        );
+        const dropOverFrame = framesRef.current.find((f) => {
+          const fr = frameRect(f);
+          return d.px >= fr.l && d.px <= fr.r && d.py >= fr.t && d.py <= fr.b;
+        });
+        const targetFrame =
+          emptyFrame ??
+          dropOverFrame ??
+          (() => {
+            const nextX = nextFrameX();
+            const newF: Frame = {
+              id: uid(),
+              name: t("loginScreen", lang),
+              x: nextX,
+              y: framesRef.current[0]?.y ?? 0,
+              bg: "inverseSurface",
+            };
+            framesRef.current = [...framesRef.current, newF];
+            setFrames((fs) => [...fs, newF]);
+            return newF;
+          })();
+        patchFrame(targetFrame.id, {
+          name: targetFrame.name === t("home", lang) ? t("loginScreen", lang) : targetFrame.name,
+          bg: "inverseSurface",
+        });
+        if (frameRef.current !== "phone") {
+          setFrame("phone");
+          frameRef.current = "phone";
+        }
+        const newGroups = createLoginTemplateGroups(targetFrame.x, targetFrame.y);
+        setGroups((gs) => [...gs, ...newGroups]);
+        setSelectedFrameId(targetFrame.id);
+        setSelectedIds(newGroups.flatMap((g) => g.items.map((it) => it.id)));
+        lightLands(newGroups[0].items[0].id, d.offX, d.offY);
+        setDrag(null);
+        queueMicrotask(() => {
+          fitRef.current();
+          requestAnimationFrame(() => fitRef.current());
+        });
+        return;
+      }
       /* a Ctrl drop lands where the cursor is, untouched by any guide hold */
       const rawX = loose ? d.px - d.offX : d.guide?.x ?? d.px - d.offX;
       const rawY = loose ? d.py - d.offY : d.guide?.y ?? d.py - d.offY;
@@ -1943,7 +1931,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const itemRects = useCallback(() => {
     const out: { id: string; l: number; t: number; r: number; b: number }[] =
       [];
-    for (const g of groupsRef.current) {
+    for (const g of resolvedGroupsRef.current) {
       for (const pl of layoutOf(g, widthsRef.current)) {
         out.push({ id: pl.item.id, l: pl.x, t: pl.y, r: pl.x + pl.w, b: pl.y + pl.h });
       }
@@ -2145,21 +2133,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGesturing]);
 
-  /* ---------- panel resize ---------- */
-  useEffect(() => {
-    if (!resizing) return;
-    const move = (e: PointerEvent) => {
-      if (resizing === "left") setLeftW(clamp(e.clientX, RAIL_W + 244, 480));
-      else setRightW(clamp(window.innerWidth - e.clientX, 280, 480));
-    };
-    const up = () => setResizing(null);
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [resizing]);
 
   /* ---------- editing ---------- */
   const primaryId = selectedIds[selectedIds.length - 1] ?? null;
@@ -2170,6 +2143,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     }
     return drag?.item.id === primaryId ? (drag?.item ?? null) : null;
   }, [groups, primaryId, drag]);
+  const selectedResolved = useMemo(
+    () => selected ? resolveComponentInstance(selected, componentLibrary).item : null,
+    [selected, componentLibrary],
+  );
 
   useEffect(() => {
     if (!selected && sheet === "edit") setSheet(null);
@@ -2253,8 +2230,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     }
   };
 
-<<<<<<< Updated upstream
-=======
   /** Definition-owned style edits become explicit overrides; content and behaviour stay on the item. */
   const patchSelectedInstance = (patch: Partial<Item>) => {
     if (!selected?.component) {
@@ -2301,7 +2276,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     patchSelected,
   });
 
->>>>>>> Stashed changes
   const deleteSelected = useCallback(() => {
     if (selectedIds.length === 0) return;
     const ids = new Set(selectedIds);
@@ -2642,18 +2616,29 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
 
   const clearAll = () => {
     setConfirmClear(false);
-    if (groupsRef.current.length === 0 && framesRef.current.length === 0)
-      return;
+    hadDocRef.current = true;
     setDraftBefore(null);
     setQuickUndo(false);
     try {
       localStorage.removeItem(BEFORE_KEY);
     } catch {}
-    snapshot();
+    snapshot(true);
+    const newFrame: Frame = { id: uid(), name: t("home", lang), x: 0, y: 0 };
+    framesRef.current = [newFrame];
+    groupsRef.current = [];
     setGroups([]);
-    setFrames([]);
+    setFrames([newFrame]);
+    if (frameRef.current !== "phone") {
+      setFrame("phone");
+      frameRef.current = "phone";
+    }
     setSelectedIds([]);
     setSelectedFrameId(null);
+    setSelectedLinkId(null);
+    queueMicrotask(() => {
+      fitRef.current();
+      requestAnimationFrame(() => fitRef.current());
+    });
   };
 
   /** Opening a project file replaces the canvas with the same restore path the saved
@@ -2844,20 +2829,19 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     setFrames([f]);
   };
 
-  const ensureFrameRef = useRef(() => {});
   ensureFrameRef.current = ensureFrame;
 
   /** A palette tile chosen without a pointer, and the phone's plus button, drop a part where
    *  the view is looking, landing as a drop there would. Over a screen it is kept inside it and
    *  nudged down when that spot is already taken; over empty canvas it stays at the centre of
    *  the view, so the new part is always in sight */
-  const addPart = (kind: Kind) => {
+  const addPart = (kind: Kind, component?: Item["component"]) => {
     /* a snapped drop still settling is committed and rendered first, so the undo step taken
      * below sees it and the free-spot search counts it */
     if (pendingRef.current) flushSync(flushPending);
     const r = canvasRect();
     const v = viewRef.current;
-    const item = makeItem(kind);
+    const item = { ...makeItem(kind), component };
     const sz = sizeOf(item, widthsRef.current);
     const cx = ((r?.width ?? 0) / 2 - v.x) / v.z;
     const cy = ((r?.height ?? 0) / 2 - v.y) / v.z;
@@ -2893,6 +2877,45 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     setSheet(null);
   };
 
+  const addExampleTemplate = (templateId: string) => {
+    if (templateId !== "login") return;
+    snapshot();
+    const emptyFrame = framesRef.current.find(
+      (f) => groupsInFrame(groupsRef.current, f, framesRef.current, widthsRef.current).length === 0,
+    );
+    let targetFrame = emptyFrame;
+    if (!targetFrame) {
+      const nextX = nextFrameX();
+      const newF: Frame = {
+        id: uid(),
+        name: t("loginScreen", lang),
+        x: nextX,
+        y: framesRef.current[0]?.y ?? 0,
+        bg: "inverseSurface",
+      };
+      framesRef.current = [...framesRef.current, newF];
+      setFrames((fs) => [...fs, newF]);
+      targetFrame = newF;
+    } else {
+      patchFrame(targetFrame.id, {
+        name: targetFrame.name === t("home", lang) ? t("loginScreen", lang) : targetFrame.name,
+        bg: "inverseSurface",
+      });
+    }
+    if (frameRef.current !== "phone") {
+      setFrame("phone");
+      frameRef.current = "phone";
+    }
+    const newGroups = createLoginTemplateGroups(targetFrame.x, targetFrame.y);
+    setGroups((gs) => [...gs, ...newGroups]);
+    setSelectedFrameId(targetFrame.id);
+    setSelectedIds(newGroups.flatMap((g) => g.items.map((it) => it.id)));
+    queueMicrotask(() => {
+      fitRef.current();
+      requestAnimationFrame(() => fitRef.current());
+    });
+  };
+
   const changeFrame = (f: FrameMode) => {
     if (f === frame) return;
     snapshot();
@@ -2906,20 +2929,16 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
 
   const addFrame = () => {
     snapshot();
-    if (frame !== "phone") {
-      setFrame("phone");
-    }
     const base = framesRef.current[0];
     const f: Frame = {
       id: uid(),
-      name: `${t("screenN", lang)} ${framesRef.current.length + 1}`,
+      name: `${t("screenN")} ${framesRef.current.length + 1}`,
       x: nextFrameX(),
       y: base?.y ?? 0,
     };
     setFrames((fs) => [...fs, f]);
     setSelectedFrameId(f.id);
     setSelectedIds([]);
-    setViewReady(true);
     const r = canvasRect();
     if (r) {
       const z = viewRef.current.z;
@@ -3088,7 +3107,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   };
 
   const showToast = (msg: string, ms = 2200, icon = "info") => {
-    showToastRef.current = showToast;
     if (!mobileRef.current) {
       showAiNote(msg, icon, ms);
       return;
@@ -3264,8 +3282,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   };
 
   /** the runs of one screen drawn with plain divs: the export layer */
+  const displayItem = (item: Item) => resolveComponentInstance(item, componentLibrary).item;
   const renderExport = (f: Frame) => {
-    const gs = groups.filter((g) => frameOfGroup(g, frames, widths)?.id === f.id);
+    const gs = resolvedGroups.filter((g) => frameOfGroup(g, frames, widths)?.id === f.id);
     const { w } = frameSizeOf(f);
     const h = frameLengthOf(f);
     return (
@@ -3372,9 +3391,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const z = clamp(Math.min((r.width - GLIDE_PAD * 2) / boxW, (r.height - GLIDE_TOP - GLIDE_PAD) / boxH, v.z), MIN_Z, MAX_Z);
     glide({ x: (r.width - boxW * z) / 2 - (f.x - BEZEL) * z, y: GLIDE_TOP + (r.height - GLIDE_TOP - GLIDE_PAD - boxH * z) / 2 - (f.y - BEZEL - FRAME_LABEL_H) * z, z });
   };
-  const previewFocusBeforeRef = useRef<HTMLElement | null>(null);
   const openPreview = (startId?: string | null) => {
-    previewFocusBeforeRef.current = document.activeElement as HTMLElement | null;
     if (frame !== "phone") {
       changeFrame("phone");
     }
@@ -3441,36 +3458,133 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     if (back) returnTimer.current = { id: window.setTimeout(() => { returnTimer.current = null; glide(back); }, 220), view: back };
   };
 
-  useEditorShortcuts({
-    editAccess,
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Tab") tabbedRef.current = true;
+      if (editAccess !== "editable") return;
+      const t = e.target as HTMLElement;
+      const typing =
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable);
+      if (typing) return;
+      // dialogs, the preview and the prompt's full-screen cover own the keyboard while they are up
+      if (confirmClear || pendingImport !== null || shareOpen || previewId !== null || promptCoverUp) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        if (selectedIds.length === 0 && selectedFrameId) duplicateFrameRef.current(selectedFrameId);
+        else duplicateSelected();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "c") {
+        /* with nothing selected, or text highlighted somewhere, the browser keeps its own copy */
+        if (selectedIds.length === 0 || window.getSelection()?.toString()) return;
+        e.preventDefault();
+        copySelected();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "v") {
+        if (!clipboardRef.current) return;
+        e.preventDefault();
+        pasteClipboard();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        if (e.shiftKey) ungroupSelected();
+        else groupSelected();
+        return;
+      }
+      /* Space presses a control reached with Tab instead of holding the hand tool; a button
+       * clicked with the mouse keeps focus too, and must not be pressed again */
+      if (e.key === " " && tabbedRef.current && t.closest?.("button, [role=button]")) return;
+      if (e.key === " " && !e.repeat) {
+        e.preventDefault();
+        setSpaceHeld(true);
+        return;
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        if (selectedIds.length === 0 && selectedFrameId)
+          deleteFrame(selectedFrameId);
+        else deleteSelected();
+        return;
+      }
+      if (e.key === "Escape") {
+        setSelectedIds([]);
+        setSelectedFrameId(null);
+        setSelectedLinkId(null);
+        return;
+      }
+      if (e.key === "p" || e.key === "P") {
+        openPreviewRef.current();
+        return;
+      }
+      if (e.key.startsWith("Arrow")) {
+        e.preventDefault();
+        const s = e.shiftKey ? 8 : 1;
+        nudge(
+          e.key === "ArrowLeft" ? -s : e.key === "ArrowRight" ? s : 0,
+          e.key === "ArrowUp" ? -s : e.key === "ArrowDown" ? s : 0,
+        );
+        return;
+      }
+      if (mod) return;
+      if (e.key === "v" || e.key === "V") setMode("select");
+      if (e.key === "h" || e.key === "H") setMode("hand");
+      if (e.key === "=" || e.key === "+") setZoomAt(viewRef.current.z * 1.2);
+      if (e.key === "-" || e.key === "_") setZoomAt(viewRef.current.z / 1.2);
+      if (e.key === "0") fitRef.current();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === " ") setSpaceHeld(false);
+    };
+    const onPointer = () => {
+      tabbedRef.current = false;
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("pointerdown", onPointer, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("pointerdown", onPointer, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    deleteSelected,
+    duplicateSelected,
+    copySelected,
+    pasteClipboard,
+    groupSelected,
+    ungroupSelected,
+    nudge,
+    redo,
+    undo,
+    setZoomAt,
+    selectedIds,
+    selectedFrameId,
+    deleteFrame,
     confirmClear,
     pendingImport,
     shareOpen,
     previewId,
     promptCoverUp,
-    selectedIds,
-    selectedFrameId,
-    undo,
-    redo,
-    duplicateSelected,
-    duplicateFrame: (id) => duplicateFrameRef.current(id),
-    copySelected,
-    pasteClipboard,
-    groupSelected,
-    ungroupSelected,
-    deleteSelected,
-    deleteFrame,
-    setSelectedIds,
-    setSelectedFrameId,
-    setSelectedLinkId,
-    openPreview: () => openPreview(),
-    nudge,
-    setMode,
-    setZoomAt,
-    currentZoom: () => viewRef.current.z,
-    fit: () => fitRef.current(),
-    setSpaceHeld,
-  });
+    editAccess,
+  ]);
   const openPreviewRef = useRef(openPreview);
   openPreviewRef.current = openPreview;
 
@@ -3513,9 +3627,12 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   }, [setGap]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const doc: Doc = useMemo(
-    () => ({ groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform: platform ?? undefined, customPalette: customPalette ?? undefined, dynamicColor, theme }),
-    [groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme],
+    () => ({ groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform: platform ?? undefined, customPalette: customPalette ?? undefined, dynamicColor, theme, componentLibrary }),
+    [groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme, componentLibrary],
   );
+  const resolvedDoc = useMemo(() => resolveDocumentComponents(doc), [doc]);
+  const resolvedGroups = resolvedDoc.groups;
+  resolvedGroupsRef.current = resolvedGroups;
   /** the same document, for callbacks that were created on an earlier render */
   docRef.current = doc;
 
@@ -3622,12 +3739,12 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const frameOf = useMemo(() => {
     const m = new Map<string, string>();
     if (frame !== "phone") return m;
-    for (const g of groups) {
+    for (const g of resolvedGroups) {
       const f = frameOfGroup(g, frames, widths);
       if (f) m.set(g.id, f.id);
     }
     return m;
-  }, [groups, frames, frame, widths]);
+  }, [resolvedGroups, frames, frame, widths]);
 
   /** the screen whose layers the panel lists: the selection's, else the chosen one */
   const layersFrame = useMemo(() => {
@@ -3641,8 +3758,8 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     return frames.find((f) => f.id === layersFrameId) ?? frames[0] ?? null;
   }, [frame, primaryId, groups, frameOf, frames, selectedFrameId, layersFrameId]);
   const layerGroups = useMemo(
-    () => (layersFrame ? groups.filter((g) => frameOf.get(g.id) === layersFrame.id) : []),
-    [groups, frameOf, layersFrame],
+    () => (layersFrame ? resolvedGroups.filter((g) => frameOf.get(g.id) === layersFrame.id) : []),
+    [resolvedGroups, frameOf, layersFrame],
   );
   /** A drag in the layers panel is one undo step: the snapshot is taken when it starts,
    *  and the reorders it fires along the way record nothing more. */
@@ -3895,7 +4012,11 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const handMode = !isMobile && (mode === "hand" || spaceHeld);
   const panning = gesture?.kind === "pan";
   const marquee = gesture?.kind === "marquee" && gesture.moved ? gesture : null;
-  const canvasBg = frame === "phone" ? p.surfaceContainerLow : "#ffffff";
+  const canvasBg = frame === "phone" ? canvasPalette.surfaceContainerLow : "#ffffff";
+  /** A 16dp world-space dot grid follows the camera, so panning and zooming feel spatial. */
+  const gridStep = 16 * view.z;
+  const gridX = ((view.x % gridStep) + gridStep) % gridStep;
+  const gridY = ((view.y % gridStep) + gridStep) % gridStep;
 
   const panelStyle: React.CSSProperties = {
     background: p.surface,
@@ -3933,8 +4054,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
           display: "flex",
           overflow: "hidden",
           background: p.surfaceContainer,
-          cursor: resizing ? "col-resize" : undefined,
-          userSelect: resizing ? "none" : undefined,
           ["--sb" as string]: p.outlineVariant,
         }}
       >
@@ -4028,15 +4147,16 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
           }
         >
           <M3Node
-            item={drag.item}
+            item={displayItem(drag.item)}
             palette={p}
             widths={widths}
             lit={dragLit}
             dragging
             radii={(() => {
-              const conn = connectSpecOf(drag.item);
-              if (!conn || !drag.snap) return baseRadii(drag.item);
-              const g = groupsRef.current.find(
+              const dragResolved = displayItem(drag.item);
+              const conn = connectSpecOf(dragResolved);
+              if (!conn || !drag.snap) return baseRadii(dragResolved);
+              const g = resolvedGroupsRef.current.find(
                 (x) => x.id === drag.snap!.groupId,
               );
               const mm = (g?.items.length ?? 0) + 1;
@@ -4101,19 +4221,29 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 </div>
               )}
               <div style={{ height: 6 }} />
-              {LEFT_TABS.map((tab, i) => (
-                <div key={tab.key} style={{ marginTop: i === 2 || i === 6 ? 10 : 0 }}>
-                  <IconBtn
-                    icon={tab.icon}
-                    p={p}
-                    on={leftOpen && leftTab === tab.key}
-                    onClick={() => {
-                      setLeftTab(tab.key);
-                      setLeftOpen(true);
-                    }}
-                    title={t(tab.title, lang)}
-                    size={44}
-                  />
+              {LEFT_TABS.map((tab) => (
+                <div key={tab.key} style={{ position: "relative" }}>
+                  {leftOpen && leftTab === tab.key && (
+                    <motion.div
+                      layoutId="left-rail-selection"
+                      transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 38, mass: 0.72 }}
+                      style={{ position: "absolute", inset: 0, borderRadius: 22, background: p.secondaryContainer, pointerEvents: "none" }}
+                    />
+                  )}
+                  <div style={{ position: "relative", zIndex: 1 }}>
+                    <IconBtn
+                      icon={tab.icon}
+                      p={p}
+                      on={leftOpen && leftTab === tab.key}
+                      transparentOn
+                      onClick={() => {
+                        setLeftTab(tab.key);
+                        setLeftOpen(true);
+                      }}
+                      title={t(tab.title, lang)}
+                      size={44}
+                    />
+                  </div>
                 </div>
               ))}
               <div style={{ flex: 1 }} onClick={() => !leftOpen && setLeftOpen(true)} />
@@ -4131,15 +4261,62 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 }}
               >
                 <span
+                  ref={titleMeasureRef}
+                  aria-hidden
                   style={{
+                    position: "fixed",
+                    left: -9999,
+                    top: -9999,
+                    visibility: "hidden",
+                    pointerEvents: "none",
+                    whiteSpace: "nowrap",
+                    fontSize: 13,
                     fontWeight: 700,
-                    fontSize: 14,
-                    color: p.onSurface,
-                    flex: 1,
                   }}
                 >
-                  {t(LEFT_TABS.find((x) => x.key === leftTab)?.title ?? "parts", lang)}
+                  {tabTitle}
                 </span>
+                <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
+                  <motion.div
+                    animate={{ width: pillWidth }}
+                    transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 460, damping: 34 }}
+                    style={{
+                      height: 28,
+                      borderRadius: 14,
+                      background: p.secondaryContainer,
+                      color: p.onSecondaryContainer,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "flex-start",
+                      paddingLeft: 12,
+                      paddingRight: 12,
+                      boxSizing: "border-box",
+                      position: "relative",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.span
+                        key={leftTab}
+                        initial={reducedMotion ? { opacity: 0 } : { y: 10, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={reducedMotion ? { opacity: 0 } : { y: -10, opacity: 0 }}
+                        transition={{ duration: 0.14, ease: [0.2, 0, 0, 1] }}
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 13,
+                          color: p.onSecondaryContainer,
+                          whiteSpace: "nowrap",
+                          lineHeight: "28px",
+                          display: "inline-block",
+                          textAlign: "left",
+                        }}
+                      >
+                        {tabTitle}
+                      </motion.span>
+                    </AnimatePresence>
+                  </motion.div>
+                </div>
                 <IconBtn
                   icon="left_panel_close"
                   p={p}
@@ -4149,25 +4326,48 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
               </div>
               <div style={{ flex: 1, minHeight: 0 }}>
                 {leftTab === "parts" ? (
-                  <PartsPalette
+                  <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+                    <div style={{ padding: "10px 14px 6px" }}>
+                      <ComponentPackagePicker
+                        library={componentLibrary}
+                        palette={p}
+                        value={componentLibrary.activePackageId}
+                        onChange={(activePackageId) => setComponentLibrary((library) => ({ ...library, activePackageId }))}
+                        label={t("officialPackage", lang)}
+                      />
+                    </div>
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      {componentLibrary.activePackageId === OFFICIAL_PACKAGE_ID ? (
+                        <PartsPalette
+                          palette={p}
+                          onPartPointerDown={onPartPointerDown}
+                          onPartActivate={addPart}
+                          onExamplePointerDown={onExamplePointerDown}
+                          onExampleActivate={addExampleTemplate}
+                        />
+                      ) : (() => {
+                        const pack = componentLibrary.packages.find((entry) => entry.id === componentLibrary.activePackageId);
+                        return <div className="no-scrollbar" style={{ padding: "14px 8px 14px 14px", display: "grid", gap: 8, overflowY: "auto", maxHeight: "100%" }}>
+                          {pack?.definitions.length ? pack.definitions.map((definition) => (
+                            <button key={definition.id} onClick={() => addPart(definition.baseKind, { packageId: pack.id, definitionId: definition.id })} style={{ border: "none", borderRadius: 16, padding: 14, textAlign: "left", background: p.surfaceContainerLow, color: p.onSurface, cursor: "pointer", font: "inherit" }}>
+                              <div style={{ fontWeight: 700 }}>{definition.name}</div>
+                              <div style={{ marginTop: 4, fontSize: 11, color: p.onSurfaceVariant }}>{definition.baseKind}</div>
+                            </button>
+                          )) : <div style={{ padding: 16, borderRadius: 16, background: p.surfaceContainerLow, color: p.onSurfaceVariant, fontSize: 12, lineHeight: 1.5 }}>{t("emptyPackage", lang)}</div>}
+                        </div>;
+                      })()}
+                    </div>
+                  </div>
+                ) : leftTab === "library" ? (
+                  <ComponentLibraryPanel
+                    library={componentLibrary}
                     palette={p}
-<<<<<<< Updated upstream
-                    favorites={favorites}
-                    onToggleFavorite={(k) =>
-                      setFavorites((f) =>
-                        f.includes(k) ? f.filter((x) => x !== k) : [...f, k],
-                      )
-                    }
-                    onPartPointerDown={onPartPointerDown}
-                    onPartActivate={addPart}
-=======
                     onActive={onActivePackage}
                     onCreate={onCreatePackage}
                     onRename={onRenamePackage}
                     onDelete={onDeletePackage}
                     onRenameDefinition={onRenameDefinition}
                     onDeleteDefinition={onDeleteDefinition}
->>>>>>> Stashed changes
                   />
                 ) : leftTab === "color" ? (
                   <ColorPanel
@@ -4188,7 +4388,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 ) : leftTab === "motion" ? (
                   <MotionPanel p={p} theme={theme} onChange={patchTheme} />
                 ) : leftTab === "ai" ? (
-                  <AiPanel p={p} settings={aiSettings} onSettings={updateAiSettings} />
+                  <AiPanel p={p} settings={aiSettings} onSettings={updateAiSettings} onToast={showToast} />
                 ) : (
                   <LayersPanel
                     p={p}
@@ -4219,23 +4419,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
               </div>
             </div>
             )}
-            {leftOpen && (
-            <div
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setResizing("left");
-              }}
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                right: -3,
-                width: 6,
-                cursor: "col-resize",
-                zIndex: 5,
-              }}
-            />
-            )}
           </aside>
         )}
 
@@ -4257,7 +4440,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
               inset: isMobile ? 6 : 8,
               overflow: "hidden",
               borderRadius: 24,
-              background: canvasBg,
+              backgroundColor: canvasBg,
+              backgroundImage: `radial-gradient(circle, ${canvasPalette.outlineVariant} 1px, transparent 1.25px)`,
+              backgroundSize: `${gridStep}px ${gridStep}px`,
+              backgroundPosition: `${gridX}px ${gridY}px`,
               cursor: panning ? "grabbing" : handMode ? "grab" : "default",
               touchAction: "none",
             }}
@@ -4352,10 +4538,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                             transition: lengthDragId === f.id ? undefined : SIZE_TRANSITION,
                           }}
                         >
-                          {groups
+                          {resolvedGroups
                             .filter((g) => frameOf.get(g.id) === f.id)
                             .map((g) => renderGroup(g, f.x, f.y))}
-                          {groups.some((g) => frameOf.get(g.id) === f.id && modalRailOf(g)) && (
+                          {resolvedGroups.some((g) => frameOf.get(g.id) === f.id && modalRailOf(g)) && (
                             <div aria-hidden style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)", pointerEvents: "none", zIndex: 1 }} />
                           )}
                           {/* where the device ends on a screen that runs further: below it, the body scrolls */}
@@ -4402,7 +4588,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   );
                 })}
 
-              {groups
+              {resolvedGroups
                 .filter((g) => !frameOf.has(g.id))
                 .map((g) => renderGroup(g, 0, 0))}
 
@@ -4411,7 +4597,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   and whatever sits opposite stays where it is */}
               {/* a FAB showing its menu is being edited as a menu, not sized as a button */}
               {!handMode && !drag && selectedIds.length === 1 && selected && selected.id !== menuId && HANDLED.has(selected.kind) && (() => {
-                const g = groups.find((x) => x.items.length === 1 && !x.free && !x.locked && x.items[0].id === selected.id);
+                const g = resolvedGroups.find((x) => x.items.length === 1 && !x.free && !x.locked && x.items[0].id === selected.id);
                 if (!g) return null;
                 const b = groupBounds(g, widths);
                 /* the same offset the group is drawn with while its left or top edge is being dragged */
@@ -4424,17 +4610,17 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                     key={selected.id}
                     /* one measure, so the part is held by the points around it rather than by
                      * its edges: a circle's diameter, a label's height */
-                    round={ROUND.has(selected.kind)}
+                    round={ROUND.has((selectedResolved ?? selected).kind)}
                     /* a bar and a slider have a width and nothing else: they are held by their two
                      * ends; a carousel is the other way about and is held by its top and bottom */
-                    sides={WIDE.has(selected.kind) ? BAR_SIDES : TALL.has(selected.kind) ? TALL_SIDES : undefined}
+                    sides={WIDE.has((selectedResolved ?? selected).kind) ? BAR_SIDES : TALL.has((selectedResolved ?? selected).kind) ? TALL_SIDES : undefined}
                     /* a part with a height of its own is held by all four edges; one whose height follows its kind by its two ends */
                     box={{ l: b.l + sx, t: b.t + sy, r: b.r + sx, b: b.b + sy }}
                     z={view.z}
                     instant={widthDragId === selected.id || sizeEditId === selected.id}
                     p={p}
-                    onDown={(e, side) => onWidthHandleDown(e, g, selected, side)}
-                    onNudge={(side, dir) => nudgeSize(g, selected, side, dir)}
+                    onDown={(e, side) => onWidthHandleDown(e, g, selectedResolved ?? selected, side)}
+                    onNudge={(side, dir) => nudgeSize(g, selectedResolved ?? selected, side, dir)}
                   />
                 );
               })()}
@@ -4616,7 +4802,14 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             onUndo={undo}
             onRedo={redo}
             onClear={() => {
-              if (groupsRef.current.length || framesRef.current.length) setConfirmClear(true);
+              const gs = groupsRef.current;
+              const fs = framesRef.current;
+              const isAlreadyEmpty = gs.length === 0 && fs.length === 1 && fs[0].x === 0 && fs[0].y === 0 && !fs[0].length;
+              if (isAlreadyEmpty) {
+                fit();
+                return;
+              }
+              if (gs.length || fs.length) setConfirmClear(true);
             }}
             onAddFrame={addFrame}
             onPreview={() => openPreview()}
@@ -4639,7 +4832,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             onLangSheet={() => setSheet(sheet === "lang" ? null : "lang")}
             onPrompt={async () => {
               try {
-                await navigator.clipboard.writeText(effectivePrompt(doc, widths, lang));
+                await navigator.clipboard.writeText(effectivePrompt(resolvedDoc, widths, lang));
                 showToast(t("copied", lang), 1400, "check");
               } catch {}
             }}
@@ -4704,9 +4897,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             {isMobile && sheet === "edit" && selected && (
               <BottomSheet key="edit" p={p} onClose={() => setSheet(null)}>
                 <MobileInspector
-                  item={selected}
+                  item={selectedResolved ?? selected}
                   palette={p}
-                  onChange={patchSelected}
+                  onChange={patchSelectedInstance}
                   onDelete={() => {
                     deleteSelected();
                     setSheet(null);
@@ -4756,40 +4949,43 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             </div>
           )}
 
-          {!rightOpen && !isMobile && (
-            <div
-              style={{ position: "absolute", right: 20, top: 20, zIndex: 45 }}
-            >
-              <IconBtn
-                icon="right_panel_open"
-                p={p}
-                on
-                onClick={() => setRightOpen(true)}
-                title={t("edit", lang)}
-                size={44}
-              />
-            </div>
-          )}
+          <AnimatePresence>
+            {!rightOpen && !isMobile && (
+              <motion.div
+                key="reopen-right"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
+                style={{ position: "absolute", right: 20, top: 20, zIndex: 45 }}
+              >
+                <IconBtn
+                  icon="right_panel_open"
+                  p={p}
+                  on
+                  onClick={() => setRightOpen(true)}
+                  title={t("edit", lang)}
+                  size={44}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </main>
 
         {/* ---- right: inspector / prompt ---- */}
-        {showRight && (
-          <aside style={{ ...panelStyle, width: rightW }}>
-            <div
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setResizing("right");
-              }}
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: -3,
-                width: 6,
-                cursor: "col-resize",
-                zIndex: 5,
-              }}
-            />
+        {!isMobile && (
+          <aside
+            style={{
+              ...panelStyle,
+              width: rightOpen ? rightW : 0,
+              flexShrink: 0,
+              overflow: "hidden",
+              transition: "width 260ms cubic-bezier(0.2, 0, 0, 1)",
+              pointerEvents: rightOpen ? undefined : "none",
+            }}
+            inert={!rightOpen || undefined}
+          >
+            <div style={{ width: rightW, height: "100%", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden", position: "relative" }}>
             <div
               style={{
                 display: "flex",
@@ -4852,7 +5048,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   onDelete={() => deleteFrame(selectedFrame.id)}
                   onDuplicate={() => duplicateFrame(selectedFrame.id)}
                   onPreview={() => openPreview(selectedFrame.id)}
-                  prompt={buildPrompt(doc, widths, selectedFrame.id, lang)}
+                  prompt={buildPrompt(resolvedDoc, widths, selectedFrame.id, lang)}
                   onSaveImage={() => saveFrameImage(selectedFrame)}
                   tidy={tidyState ?? "done"}
                   onTidy={() => tidy(selectedFrame)}
@@ -4872,20 +5068,16 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                     },
                     onCancel: cancelAi,
                   }}
-                  item={selectedIds.length > 1 ? null : selected}
+                  item={selectedIds.length > 1 ? null : selectedResolved}
                   railStandalone={groups.some((g) => g.items.length === 1 && g.items[0].id === selected?.id)}
                   frame={selectedPartFrame}
                   palette={p}
                   frames={frame === "phone" ? frames : []}
-<<<<<<< Updated upstream
-                  onChange={patchSelected}
-=======
                   onChange={patchSelectedInstance}
                   componentLibrary={componentLibrary}
                   onSaveAsComponent={onSaveAsComponent}
                   onUpdateComponent={onUpdateComponent}
                   onDetachComponent={onDetachComponent}
->>>>>>> Stashed changes
                   onDelete={deleteSelected}
                   onDuplicate={duplicateSelected}
                   locked={selectedLocked}
@@ -4905,7 +5097,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 />
               ) : (
                 <PromptPanel
-                  doc={doc}
+                  doc={resolvedDoc}
                   widths={widths}
                   palette={p}
                   onCover={setPromptCoverUp}
@@ -4919,6 +5111,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   }}
                 />
               )}
+            </div>
             </div>
           </aside>
         )}
@@ -4979,7 +5172,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
         {previewId !== null && frames.length > 0 && (
           <Preview
             key="preview"
-            doc={doc}
+            doc={resolvedDoc}
             widths={widths}
             palette={p}
             startId={previewId}

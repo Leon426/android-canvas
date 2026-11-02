@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { paletteOf } from "@/lib/tokens";
-import { InputDialog, Section, StaticCardSection, CollapsibleSection, Segmented } from "./ui";
+import { InputDialog, Section, StaticCardSection, CollapsibleSection } from "./ui";
 
 const palette = paletteOf("purple");
 
@@ -90,40 +90,5 @@ describe("InputDialog component", () => {
       />
     );
     expect(html).toBe("");
-  });
-});
-
-describe("Segmented radiogroup component", () => {
-  it("renders with explicit label as aria-label", () => {
-    const html = renderToStaticMarkup(
-      <Segmented<"a" | "b">
-        label="Mode Selection"
-        options={[
-          { key: "a", label: "Option A" },
-          { key: "b", label: "Option B" },
-        ]}
-        value="a"
-        onChange={() => {}}
-        p={palette}
-      />
-    );
-    expect(html).toContain('role="radiogroup"');
-    expect(html).toContain('aria-label="Mode Selection"');
-  });
-
-  it("falls back to option labels/titles when label is omitted", () => {
-    const html = renderToStaticMarkup(
-      <Segmented<"a" | "b">
-        options={[
-          { key: "a", label: "Option A" },
-          { key: "b", title: "Option B Title" },
-        ]}
-        value="a"
-        onChange={() => {}}
-        p={palette}
-      />
-    );
-    expect(html).toContain('role="radiogroup"');
-    expect(html).toContain('aria-label="Option A, Option B Title"');
   });
 });

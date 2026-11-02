@@ -1,0 +1,10 @@
+#!/bin/sh
+# Gate commits on the same checks CI runs, so a broken merge cannot land again.
+# Enable once per clone with: npm run prepare   (or: git config core.hooksPath .githooks)
+set -e
+
+echo "pre-commit: typechecking"
+npx tsc --noEmit
+
+echo "pre-commit: running tests"
+npx vitest run

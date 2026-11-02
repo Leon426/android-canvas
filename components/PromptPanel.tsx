@@ -316,6 +316,7 @@ export function PromptPanel({
   onDoc: (patch: Partial<Doc>) => void;
   /** told when the full-screen cover has opened, and when it starts to close */
   onCover?: (up: boolean) => void;
+  /** Download the Agent Bundle (unresolved prototype + library + prompt). */
   onDownloadBundle?: () => void;
 }) {
   const lang = useLang();
@@ -339,13 +340,6 @@ export function PromptPanel({
   /** the close's own timer and frame, cleared if the panel goes before they fire */
   const closeTimer = useRef<{ id: number; raf: number } | null>(null);
   /** the mark whose stretch is lit: the one tapped, or the one the caret is in */
-  const [winW, setWinW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onResize = () => setWinW(window.innerWidth);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
   const [lit, setLit] = useState(-1);
   const [jump, setJump] = useState(0);
   const area = useRef<HTMLTextAreaElement | null>(null);
@@ -475,7 +469,7 @@ export function PromptPanel({
           readOnly
           corner={
             <div style={{ display: "flex", width: "100%", justifyContent: "flex-end" }}>
-              <div className="m3-run" style={{ display: "flex", gap: 3 }}>
+              <div className="m3-run" style={{ display: "flex", gap: 3, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 {onDownloadBundle && (
                   <IconBtn icon="download" p={p} size={44} onClick={onDownloadBundle} title={t("downloadAgentBundle", lang)} />
                 )}
@@ -555,7 +549,7 @@ export function PromptPanel({
               width: 220,
               top: grown ? 40 : PANEL_PAD_TOP,
               bottom: 12,
-              display: winW >= 900 ? "flex" : "none",
+              display: "flex",
               flexDirection: "column",
               opacity: grown ? 1 : 0,
               transition: `top ${COVER_MS}ms ${COVER_EASE}, opacity ${grown ? COVER_MS : 140}ms ease`,
@@ -569,11 +563,7 @@ export function PromptPanel({
               right: 12,
               /* on the way out the box takes the panel's width at once, so its words wrap as the panel's do */
               /* the box takes what the two columns leave, and keeps a readable width on a narrow window */
-              width: narrow
-                ? from.width - 24
-                : winW >= 900
-                  ? "max(280px, calc(100% - 592px))"
-                  : "max(280px, calc(100% - 352px))",
+              width: narrow ? from.width - 24 : "max(280px, calc(100% - 592px))",
               top: grown ? 40 : PANEL_PAD_TOP + 40 + 10,
               bottom: 12,
               display: "flex",
@@ -604,6 +594,9 @@ export function PromptPanel({
                   {/* the copy and the way back to the panel, joined: both are about being done here. On
                       the way out the button already wears the panel's icon, so the hand-over is seamless. */}
                   <div className="m3-run" style={{ display: "flex", gap: 3 }}>
+                    {onDownloadBundle && (
+                      <IconBtn icon="download" p={p} size={44} onClick={onDownloadBundle} title={t("downloadAgentBundle", lang)} />
+                    )}
                     <CopyButton copied={copied} onClick={copy} p={p} />
                     <IconBtn icon={cover === "closing" ? "open_in_full" : "close_fullscreen"} p={p} size={44} on onClick={close} title={t(cover === "closing" ? "fullscreen" : "exitFullscreen", lang)} />
                   </div>

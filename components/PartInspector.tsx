@@ -616,20 +616,20 @@ export function PartInspector({
 
       {/* ---------- style and colour ---------- */}
       {(kind === "card" || isField(kind) || kind === "toolbar" || kind === "searchBar") && (
-        <Section id="part-style" icon="palette" title={t("style", lang)} p={p}>
+        <Section id="part-style" icon="palette" title={t("style", lang)} p={p} defaultOpen>
           <StyleRun kind={kind} value={item.variant} onChange={(variant) => onChange({ variant })} p={p} />
         </Section>
       )}
       {kind === "listItem" && (
         /* a list item wears one of a few looks, the way a FAB does: the row's colour and the
            disc behind its icon are set together, so the icon always reads on the row */
-        <Section id="part-style" icon="palette" title={t("style", lang)} p={p}>
+        <Section id="part-style" icon="palette" title={t("style", lang)} p={p} defaultOpen>
           <ListStyleRun item={item} onChange={onChange} p={p} />
         </Section>
       )}
       {(kind === "box" || kind === "bottomSheet") && (
         /* a box's style is the theme role it is painted in */
-        <Section id="part-style" icon="palette" title={t("style", lang)} p={p}>
+        <Section id="part-style" icon="palette" title={t("style", lang)} p={p} defaultOpen>
           <FillRun value={item.fill ?? "surfaceContainerLow"} onChange={(fill) => onChange({ fill })} p={p} />
         </Section>
       )}

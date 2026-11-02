@@ -70,7 +70,7 @@ export function PanelShell({
           className="no-scrollbar"
           inert={locked || undefined}
           /* under a row of tabs the content starts below them; with none, it starts under the fade's thick part */
-          style={{ padding: `${tabs ? PANEL_TABS_H + PANEL_TABS_GAP : PANEL_FADE_H / 2}px 12px 20px`, overflowY: "auto", height: "100%" }}
+          style={{ padding: `${tabs ? PANEL_TABS_H + PANEL_TABS_GAP : PANEL_FADE_H / 2}px 6px 20px 12px`, overflowY: "auto", height: "100%" }}
         >
           {children}
         </div>
@@ -264,6 +264,7 @@ export function IconBtn({
   fill,
   hasPopup,
   expanded,
+  transparentOn,
 }: {
   icon: string;
   on?: boolean;
@@ -277,6 +278,8 @@ export function IconBtn({
   /** the button opens a menu or a list, and whether it is open now */
   hasPopup?: "menu" | "listbox";
   expanded?: boolean;
+  /** keep selected foreground semantics while a shared indicator paints the background */
+  transparentOn?: boolean;
 }) {
   return (
     <button
@@ -292,7 +295,7 @@ export function IconBtn({
         height: size,
         borderRadius: size / 2,
         border: "none",
-        background: on ? (danger ? p.errorContainer : p.secondaryContainer) : "transparent",
+        background: on && !transparentOn ? (danger ? p.errorContainer : p.secondaryContainer) : "transparent",
         color: disabled
           ? p.outlineVariant
           : danger
@@ -360,18 +363,11 @@ export function Segmented<K extends string>({
     onChange(next.key);
     (group.current?.querySelector(`[data-key="${next.key}"]`) as HTMLElement | null)?.focus();
   };
-  const computedLabel =
-    label ||
-    options
-      .map((o) => o.title || o.label || o.key)
-      .filter(Boolean)
-      .join(", ") ||
-    "Option selection";
   return (
     <div
       ref={group}
       role="radiogroup"
-      aria-label={computedLabel}
+      aria-label={label}
       onKeyDown={(e) => {
         if (e.key === "ArrowRight" || e.key === "ArrowDown") walk(e, 1);
         else if (e.key === "ArrowLeft" || e.key === "ArrowUp") walk(e, -1);
@@ -1412,45 +1408,165 @@ export function Toggle({
   );
 }
 
-/** Collapsible section; collapsed state is remembered per key. */
-export function Section({
-  id,
-  icon,
-  title,
-  p,
-  children,
-  right,
-  defaultOpen = true,
-  onToggle,
-}: {
+export type SectionProps = {
   id: string;
   icon: string;
   title: string;
   p: Palette;
   children: React.ReactNode;
   right?: React.ReactNode;
+  open?: boolean;
   defaultOpen?: boolean;
   /** called after the user opens or collapses the section by hand */
   onToggle?: (open: boolean) => void;
+  /** palette/category navigation uses a filled M3 list-item treatment */
+  m3Card?: boolean;
+  /** render as an M3 card container */
+  card?: boolean;
+  /** whether the section can be collapsed/expanded */
+  collapsible?: boolean;
+};
+
+export function StaticCardSection({
+  icon,
+  title,
+  p,
+  children,
+  right,
+}: {
+  icon: string;
+  title: string;
+  p: Palette;
+  children: React.ReactNode;
+  right?: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div
+      style={{
+        marginBottom: 10,
+        borderRadius: 18,
+        background: p.surfaceContainerLow,
+        padding: "12px 14px 14px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          minHeight: 28,
+          marginBottom: 10,
+          color: p.onSurface,
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+        }}
+      >
+        <Icon name={icon} size={18} />
+        <span style={{ flex: 1 }}>{title}</span>
+        {right}
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+export function CollapsibleSection({
+  id,
+  icon,
+  title,
+  p,
+  children,
+  right,
+  open: controlledOpen,
+  defaultOpen = false,
+  onToggle,
+  m3Card = false,
+}: SectionProps) {
+  const [internalOpen, setInternalOpen] = useState(() => {
+    if (controlledOpen !== undefined) return controlledOpen;
+    if (typeof window !== "undefined") {
+      try {
+        const v = localStorage.getItem(`m3e:sec:${id}`);
+        if (v !== null) return v === "1";
+      } catch {}
+    }
+    return defaultOpen;
+  });
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
+    if (controlledOpen !== undefined) return;
     try {
       const v = localStorage.getItem(`m3e:sec:${id}`);
-      if (v !== null) setOpen(v === "1");
+      if (v !== null) setInternalOpen((cur) => (cur === (v === "1") ? cur : v === "1"));
     } catch {}
-  }, [id]);
+  }, [id, controlledOpen]);
   const toggle = () => {
     const next = !open;
-    try {
-      localStorage.setItem(`m3e:sec:${id}`, next ? "1" : "0");
-    } catch {}
-    setOpen(next);
+    if (controlledOpen === undefined) {
+      try {
+        localStorage.setItem(`m3e:sec:${id}`, next ? "1" : "0");
+      } catch {}
+      setInternalOpen(next);
+    }
     onToggle?.(next);
   };
+  /* palette/category navigation: a filled M3 list-item header, no surrounding card */
+  if (m3Card) {
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, height: 48 }}>
+          <button
+            onClick={toggle}
+            aria-expanded={open}
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              height: 48,
+              padding: "0 14px",
+              border: "none",
+              background: open ? p.secondaryContainer : p.surfaceContainerLow,
+              color: open ? p.onSecondaryContainer : p.onSurfaceVariant,
+              cursor: "pointer",
+              borderRadius: 18,
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textAlign: "left",
+            }}
+          >
+            <Icon name={icon} size={18} />
+            <span style={{ flex: 1 }}>{title}</span>
+            <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration: reduceMotion ? 0 : 0.2, ease: [0.2, 0, 0, 1] }} style={{ display: "inline-flex" }}>
+              <Icon name="expand_more" size={18} />
+            </motion.span>
+          </button>
+          {right}
+        </div>
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              key="content"
+              initial={{ height: 0, opacity: 0, y: -6 }}
+              animate={{ height: "auto", opacity: 1, y: 0 }}
+              exit={{ height: 0, opacity: 0, y: -4 }}
+              transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.2, 0, 0, 1] }}
+              style={{ overflow: "hidden" }}
+            >
+              <div style={{ padding: "10px 4px 14px" }}>{children}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+  /* settings panels: the previous card container, now with a click-to-collapse header */
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, height: 36 }}>
+    <div style={{ marginBottom: 10, borderRadius: 18, background: p.surfaceContainerLow, padding: "12px 14px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <button
           onClick={toggle}
           aria-expanded={open}
@@ -1459,14 +1575,13 @@ export function Section({
             display: "flex",
             alignItems: "center",
             gap: 8,
-            height: 36,
-            padding: "0 6px",
+            minHeight: 28,
+            padding: 0,
             border: "none",
             background: "transparent",
-            color: p.onSurfaceVariant,
+            color: p.onSurface,
             cursor: "pointer",
-            borderRadius: 12,
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: 700,
             letterSpacing: 0.4,
             textAlign: "left",
@@ -1478,9 +1593,22 @@ export function Section({
         </button>
         {right}
       </div>
-      {open && <div style={{ padding: "6px 4px 14px" }}>{children}</div>}
+      {open && <div style={{ paddingTop: 10 }}>{children}</div>}
     </div>
   );
+}
+
+/** Collapsible section; collapsed state is remembered per key. */
+export function Section({
+  collapsible = true,
+  card,
+  ...rest
+}: SectionProps) {
+  const isCard = card ?? !rest.m3Card;
+  if (isCard && !collapsible) {
+    return <StaticCardSection {...rest} />;
+  }
+  return <CollapsibleSection {...rest} />;
 }
 
 export function Tile({
@@ -1933,6 +2061,160 @@ export function ConfirmDialog({
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               {btn(t("cancel", lang), false, onCancel)}
               {btn(t("ok", lang), true, onConfirm)}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+export function InputDialog({
+  open,
+  title,
+  placeholder,
+  initialValue = "",
+  confirmLabel,
+  icon = "deployed_code",
+  palette: p,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  placeholder?: string;
+  initialValue?: string;
+  confirmLabel?: string;
+  icon?: string;
+  palette: Palette;
+  onCancel: () => void;
+  onConfirm: (value: string) => void;
+}) {
+  const lang = useLang();
+  const [val, setVal] = useState(initialValue);
+  useEffect(() => {
+    if (open) setVal(initialValue);
+  }, [open, initialValue]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onCancel();
+      }
+      if (e.key === "Enter" && val.trim()) {
+        e.stopPropagation();
+        onConfirm(val.trim());
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, val, onCancel, onConfirm]);
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="scrim"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          onClick={onCancel}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 600,
+            background: "rgba(0,0,0,0.32)",
+            display: "grid",
+            placeItems: "center",
+            padding: 24,
+          }}
+        >
+          <motion.div
+            role="dialog"
+            aria-modal
+            aria-label={title}
+            initial={{ scale: 0.92, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.96, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 520, damping: 34, mass: 0.7 }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(100%, 340px)",
+              padding: 24,
+              borderRadius: 28,
+              background: p.surfaceContainerHigh,
+              color: p.onSurface,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.10)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <div style={{ textAlign: "center", color: p.primary }}>
+              <Icon name={icon} size={28} />
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, textAlign: "center" }}>{title}</div>
+            <input
+              autoFocus
+              value={val}
+              placeholder={placeholder}
+              onChange={(e) => setVal(e.target.value)}
+              style={{
+                height: 44,
+                borderRadius: 12,
+                padding: "0 14px",
+                border: `1.5px solid ${p.outlineVariant}`,
+                background: p.surface,
+                color: p.onSurface,
+                fontSize: 14,
+                fontFamily: "inherit",
+                outline: "none",
+              }}
+            />
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+              <button
+                type="button"
+                onClick={onCancel}
+                className="m3-press"
+                style={{
+                  height: 40,
+                  padding: "0 16px",
+                  borderRadius: 20,
+                  border: "none",
+                  background: "transparent",
+                  color: p.primary,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                {t("cancel", lang)}
+              </button>
+              <button
+                type="button"
+                disabled={!val.trim()}
+                onClick={() => {
+                  if (val.trim()) onConfirm(val.trim());
+                }}
+                className="m3-press"
+                style={{
+                  height: 40,
+                  padding: "0 16px",
+                  borderRadius: 20,
+                  border: "none",
+                  background: p.primary,
+                  color: p.onPrimary,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: val.trim() ? "pointer" : "not-allowed",
+                  opacity: val.trim() ? 1 : 0.5,
+                }}
+              >
+                {confirmLabel ?? t("save", lang)}
+              </button>
             </div>
           </motion.div>
         </motion.div>

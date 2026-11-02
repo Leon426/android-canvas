@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, customizable-components]
 
 # Read-only: this also runs on pull requests from forks.
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   check:
-    name: typecheck and build
+    name: typecheck, test, and build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -26,6 +26,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      # Same base path the Pages workflow publishes, so a broken subpath fails here.
+      # There is no lint script in package.json.
       - run: npm run build
         env:
           NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+          NEXT_PUBLIC_SITE_ORIGIN: https://leon426.github.io

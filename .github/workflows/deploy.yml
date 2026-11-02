@@ -2,9 +2,11 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [customizable-components]
   workflow_dispatch:
 
+# configure-pages reads the Pages site; deploy-pages writes it.
+# Settings → Pages → Source must be "GitHub Actions" or the deploy job fails.
 permissions:
   contents: read
   pages: write
@@ -12,7 +14,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -23,16 +25,26 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v6
       - run: npm ci
       - name: Build static site
-        # Project sites live under /<repo>; user sites (<user>.github.io) use "".
+        # configure-pages reports "/android-canvas" for this project site
+        # and "" for a user site or a custom domain at the host root.
+        # next.config.ts reads these at build time. Do not pass
+        # static_site_generator: next — that action only rewrites
+        # next.config.js, and this repo uses next.config.ts.
         run: npm run build
         env:
-          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
-      - run: touch out/.nojekyll
-      - uses: actions/upload-pages-artifact@v5
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_PUBLIC_SITE_ORIGIN: ${{ steps.pages.outputs.origin }}
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
         with:
           path: out
+          # public/.nojekyll is copied into out/. Hidden files are omitted otherwise.
+          include-hidden-files: true
 
   deploy:
     needs: build

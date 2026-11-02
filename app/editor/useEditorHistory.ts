@@ -6,6 +6,17 @@ import type { DocMeta, Snapshot } from "./types";
 
 const HISTORY_MAX = 100;
 
+/**
+ * A snapshot is replayed much later, so it keeps its own copy of the document.
+ * Pushing the live arrays straight onto the stack would let a later in-place edit
+ * rewrite steps that were already recorded, which corrupts undo/redo.
+ */
+export const snapshotOf = (groups: Group[], frames: Frame[], meta: DocMeta, withMeta: boolean): Snapshot => ({
+  groups: structuredClone(groups),
+  frames: structuredClone(frames),
+  meta: withMeta ? structuredClone(meta) : undefined,
+});
+
 type UseEditorHistoryArgs = {
   groupsRef: MutableRefObject<Group[]>;
   framesRef: MutableRefObject<Frame[]>;
@@ -45,7 +56,7 @@ export function useEditorHistory({
 
   const current = (withMeta: boolean): Snapshot => {
     const { groups: _g, frames: _f, ...meta } = docRef.current;
-    return { groups: groupsRef.current, frames: framesRef.current, meta: withMeta ? (meta as DocMeta) : undefined };
+    return snapshotOf(groupsRef.current, framesRef.current, meta as DocMeta, withMeta);
   };
 
   const restore = (snap: Snapshot) => {

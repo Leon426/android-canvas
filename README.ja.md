@@ -1,3 +1,5 @@
+> **Fork note:** このページは上流 [lnkiai/m3e-canvas](https://github.com/lnkiai/m3e-canvas) の日本語 README です。コンポーネントライブラリを含むこのフォークの説明は [README.md](README.md) にあります。
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-dark.png" />

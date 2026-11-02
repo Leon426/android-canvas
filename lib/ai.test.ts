@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { complete, hasKey, isSecureUrl, type AiSettings, type Provider } from "./ai";
+import { complete, DEFAULT_AI, hasKey, isSecureUrl, isValidAiKey, keyScopeOf, loadAiSettings, normalizeAiKey, saveAiSettings, switchProvider, updateProviderConfig, type AiSettings, type Provider } from "./ai";
 
 const settings = (over: Partial<AiSettings> = {}): AiSettings =>
   ({ provider: "openai", baseUrl: "https://api.example.test", model: "test-model", key: "test-key", ...over });
@@ -132,5 +132,207 @@ describe("hasKey and isSecureUrl", () => {
     expect(isSecureUrl("http://127.0.0.1:8080/v1")).toBe(true);
     expect(isSecureUrl("http://[::1]:8080/v1")).toBe(true);
     expect(isSecureUrl("http://api.example.test/v1")).toBe(false);
+  });
+});
+
+describe("per-provider configuration and switching", () => {
+  it("keeps keys and configurations strictly isolated between providers", () => {
+    let s = { ...DEFAULT_AI };
+
+    // Set DeepSeek key and custom model
+    s = switchProvider(s, "deepseek");
+    expect(s.provider).toBe("deepseek");
+    expect(s.key).toBe("");
+
+    s = updateProviderConfig(s, { key: "sk-deepseek-xyz", model: "deepseek-chat" });
+    expect(s.key).toBe("sk-deepseek-xyz");
+    expect(s.model).toBe("deepseek-chat");
+
+    // Switch to Claude - key must NOT be shared or carried over
+    s = switchProvider(s, "claude");
+    expect(s.provider).toBe("claude");
+    expect(s.key).toBe("");
+    expect(s.model).not.toBe("deepseek-chat");
+
+    // Set Claude key
+    s = updateProviderConfig(s, { key: "sk-ant-claude-999" });
+    expect(s.key).toBe("sk-ant-claude-999");
+
+    // Switch back to DeepSeek - original key and model must be restored
+    s = switchProvider(s, "deepseek");
+    expect(s.provider).toBe("deepseek");
+    expect(s.key).toBe("sk-deepseek-xyz");
+    expect(s.model).toBe("deepseek-chat");
+
+    // Switch back to Claude - Claude key must be intact
+    s = switchProvider(s, "claude");
+    expect(s.provider).toBe("claude");
+    expect(s.key).toBe("sk-ant-claude-999");
+  });
+
+  it("persists and restores per-provider configuration in localStorage", () => {
+    const store: Record<string, string> = {};
+    const mockStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v; },
+      removeItem: (k: string) => { delete store[k]; },
+    };
+    vi.stubGlobal("localStorage", mockStorage);
+
+    let s = { ...DEFAULT_AI };
+    s = switchProvider(s, "deepseek");
+    s = updateProviderConfig(s, { key: "ds-secret-key" });
+    saveAiSettings(s);
+
+    const loaded = loadAiSettings();
+    expect(loaded.provider).toBe("deepseek");
+    expect(loaded.key).toBe("ds-secret-key");
+    expect(loaded.providers?.deepseek?.key).toBe("ds-secret-key");
+    expect(loaded.providers?.claude?.key).toBe("");
+  });
+
+  it("handles legacy localStorage format gracefully", () => {
+    const mockStorage = {
+      getItem: () => JSON.stringify({ provider: "deepseek", key: "legacy-key", model: "legacy-model", baseUrl: "https://legacy.url" }),
+      setItem: () => {},
+      removeItem: () => {},
+    };
+    vi.stubGlobal("localStorage", mockStorage);
+
+    const loaded = loadAiSettings();
+    expect(loaded.provider).toBe("deepseek");
+    expect(loaded.key).toBe("legacy-key");
+    expect(loaded.model).toBe("legacy-model");
+    expect(loaded.baseUrl).toBe("https://legacy.url");
+    expect(loaded.keyScope).toBe("device");
+    // Ensure other providers are initialized with their defaults and empty keys
+    expect(loaded.providers?.claude?.key).toBe("");
+    expect(loaded.providers?.openai?.key).toBe("");
+  });
+});
+
+describe("key storage scope and key validation", () => {
+  const memoryStorage = () => {
+    const store: Record<string, string> = {};
+    return {
+      store,
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => {
+        store[k] = v;
+      },
+      removeItem: (k: string) => {
+        delete store[k];
+      },
+    };
+  };
+
+  const bothStorages = () => {
+    const device = memoryStorage();
+    const session = memoryStorage();
+    vi.stubGlobal("localStorage", device);
+    vi.stubGlobal("sessionStorage", session);
+    return { device, session };
+  };
+
+  it("trims a key and rejects one that is only whitespace", () => {
+    expect(normalizeAiKey("  sk-abc  ")).toBe("sk-abc");
+    expect(normalizeAiKey("   ")).toBe("");
+    expect(normalizeAiKey(undefined)).toBe("");
+    expect(isValidAiKey("  sk-abc  ")).toBe(true);
+    expect(isValidAiKey("   ")).toBe(false);
+    expect(isValidAiKey("")).toBe(false);
+  });
+
+  it("treats settings without a scope as device-scoped", () => {
+    expect(keyScopeOf({})).toBe("device");
+    expect(keyScopeOf({ keyScope: "session" })).toBe("session");
+  });
+
+  it("writes a session-scoped key to sessionStorage and never to localStorage", () => {
+    const { device, session } = bothStorages();
+    saveAiSettings({ ...settings({ key: "  sk-session  " }), keyScope: "session" });
+
+    expect(JSON.parse(session.store["m3e:ai"]).key).toBe("sk-session");
+    expect(JSON.parse(session.store["m3e:ai"]).keyScope).toBe("session");
+    // the long-lived copy records the choice but carries no secret
+    const longLived = JSON.parse(device.store["m3e:ai"]);
+    expect(longLived.key).toBe("");
+    expect(longLived.keyScope).toBe("session");
+    for (const p of ["openai", "claude", "gemini", "deepseek"]) {
+      expect(longLived.providers[p].key).toBe("");
+    }
+
+    const loaded = loadAiSettings();
+    expect(loaded.key).toBe("sk-session");
+    expect(loaded.keyScope).toBe("session");
+    expect(loaded.provider).toBe("openai");
+  });
+
+  it("forgets a session key when the browser closes but keeps the scope choice", () => {
+    const { device, session } = bothStorages();
+    saveAiSettings({ ...settings({ key: "sk-live" }), keyScope: "session" });
+
+    // a new browser session starts with an empty sessionStorage
+    session.removeItem("m3e:ai");
+
+    const loaded = loadAiSettings();
+    expect(loaded.key).toBe("");
+    expect(loaded.keyScope).toBe("session");
+    expect(JSON.parse(device.store["m3e:ai"]).key).toBe("");
+  });
+
+  it("removes the plaintext key from localStorage when switching to session", () => {
+    const { device, session } = bothStorages();
+    saveAiSettings({ ...settings({ key: "sk-device" }) });
+    expect(JSON.parse(device.store["m3e:ai"]).key).toBe("sk-device");
+
+    saveAiSettings({ ...settings({ key: "sk-device" }), keyScope: "session" });
+    expect(JSON.parse(device.store["m3e:ai"]).key).toBe("");
+    expect(JSON.parse(session.store["m3e:ai"]).key).toBe("sk-device");
+  });
+
+  it("clears the session copy when switching back to device scope", () => {
+    const { device, session } = bothStorages();
+    saveAiSettings({ ...settings({ key: "sk-keep" }), keyScope: "session" });
+    saveAiSettings({ ...settings({ key: "sk-keep" }) });
+
+    expect(JSON.parse(device.store["m3e:ai"]).key).toBe("sk-keep");
+    expect(device.store["m3e:ai"]).toContain('"keyScope":"device"');
+    expect(session.store["m3e:ai"]).toBeUndefined();
+
+    const loaded = loadAiSettings();
+    expect(loaded.key).toBe("sk-keep");
+    expect(loaded.keyScope).toBe("device");
+  });
+
+  it("trims a padded key before persisting it and never stores whitespace", () => {
+    const { device } = bothStorages();
+    saveAiSettings({ ...settings({ key: "  sk-padded  " }) });
+    expect(JSON.parse(device.store["m3e:ai"]).key).toBe("sk-padded");
+    expect(loadAiSettings().key).toBe("sk-padded");
+
+    saveAiSettings({ ...settings({ key: "    " }) });
+    expect(JSON.parse(device.store["m3e:ai"]).key).toBe("");
+    expect(loadAiSettings().key).toBe("");
+  });
+});
+
+describe("isSecureUrl", () => {
+  it("accepts an https endpoint", () => {
+    expect(isSecureUrl("https://api.example.test")).toBe(true);
+  });
+
+  it("accepts a server on this machine over http", () => {
+    expect(isSecureUrl("http://localhost:1234")).toBe(true);
+    expect(isSecureUrl("http://127.0.0.1:1234/v1")).toBe(true);
+    expect(isSecureUrl("http://[::1]:1234")).toBe(true);
+  });
+
+  it("rejects plain http to a remote host", () => {
+    expect(isSecureUrl("http://api.example.test")).toBe(false);
+  });
+
+  it("rejects a userinfo trick that only looks local", () => {
+    expect(isSecureUrl("http://127.0.0.1:8080@evil.example")).toBe(false);
   });
 });

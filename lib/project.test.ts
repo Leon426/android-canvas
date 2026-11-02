@@ -15,6 +15,27 @@ const withItem = (patch: Record<string, unknown>) => {
 };
 
 describe("isProject", () => {
+  it("accepts a versioned component library and component instances", () => {
+    const value = withItem({ component: { definitionId: "primary-action", overrides: { radiusTop: 8 } } });
+    value.componentLibrary = { schemaVersion: 1, definitions: [{
+      id: "primary-action", name: "Primary action", baseKind: "button", style: { variant: "tonal", radiusBottom: 16 },
+    }] };
+    expect(isProject(value)).toBe(true);
+  });
+
+  it("accepts documents with unknown future component library versions", () => {
+    expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 3, something: "future" } })).toBe(true);
+  });
+
+  it("rejects malformed component libraries and instance overrides", () => {
+    expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 2, definitions: [] } })).toBe(false);
+    expect(isProject({ ...doc(), componentLibrary: { schemaVersion: 1, definitions: [
+      { id: "same", name: "One", baseKind: "button", style: {} },
+      { id: "same", name: "Two", baseKind: "button", style: {} },
+    ] } })).toBe(false);
+    expect(isProject(withItem({ component: { definitionId: "x", overrides: { label: "not style" } } }))).toBe(false);
+  });
+
   it("accepts a current document without changing it", () => {
     const value = doc();
     const before = structuredClone(value);
@@ -226,6 +247,15 @@ describe("readProject", () => {
 
   it("returns null for valid JSON with an invalid nested item", async () => {
     await expect(readProject(new File([JSON.stringify(withItem({ kind: "unknown" }))], "bad.json"))).resolves.toBeNull();
+  });
+
+  it("ignores unknown component library versions and preserves groups and frames", async () => {
+    const value = { ...doc(), componentLibrary: { schemaVersion: 3, futurePayload: { test: true } } };
+    const result = await readProject(new File([JSON.stringify(value)], "future.json"));
+    expect(result).not.toBeNull();
+    expect(result?.componentLibrary).toBeUndefined();
+    expect(result?.groups).toEqual(value.groups);
+    expect(result?.frames).toEqual(value.frames);
   });
 
   it("returns null when reading the File fails", async () => {

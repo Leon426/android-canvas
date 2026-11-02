@@ -8,14 +8,7 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
-import {
-  DOC_KEY,
-  DOC_LOCK,
-  UI_KEY,
-  backupCorruptDoc,
-  parseLocalDoc,
-  safeSetStorageItem,
-} from "@/lib/localDoc";
+import { DOC_KEY, backupCorruptDoc, parseLocalDoc } from "@/lib/localDoc";
 import { isProject } from "@/lib/project";
 import { EMPTY_COMPONENT_LIBRARY, normalizeComponentLibrary, type ComponentLibrary } from "@/lib/componentLibrary";
 import { loadAiSettings, type AiSettings } from "@/lib/ai";
@@ -36,7 +29,9 @@ import {
 import type { Mode } from "@/components/Toolbar";
 import type { EditAccess, View } from "./types";
 
-export { BEFORE_KEY, DOC_KEY, DOC_LOCK, UI_KEY } from "@/lib/localDoc";
+export const BEFORE_KEY = "m3e:doc:before";
+export const DOC_LOCK = "m3e:doc:editor";
+export const UI_KEY = "m3e:ui";
 
 type SetGroups = (next: Group[] | ((prev: Group[]) => Group[])) => void;
 
@@ -72,8 +67,6 @@ export type DocumentPersistenceDeps = {
   setFavorites: Dispatch<SetStateAction<Kind[]>>;
   setMode: Dispatch<SetStateAction<Mode>>;
   setEditAccess: Dispatch<SetStateAction<EditAccess>>;
-  setViewReady?: Dispatch<SetStateAction<boolean>>;
-  onQuotaExceeded?: () => void;
 };
 
 export type DocumentAutosaveState = {
@@ -104,109 +97,111 @@ export type DocumentAutosaveState = {
 
 /**
  * Document lock, cold-start restore (with isProject validation), applyDoc, and
- * autosave with quota error handling.
+ * autosave. Draft arrive / import stay composed in Editor because they also
+ * take history snapshots.
  */
-export function useDocumentPersistence(
-  d: DocumentPersistenceDeps,
-  autosave: DocumentAutosaveState,
-) {
+export function useDocumentPersistence(deps: DocumentPersistenceDeps, autosave: DocumentAutosaveState) {
+  const depsRef = useRef(deps);
+  depsRef.current = deps;
+
   const loadedRef = useRef(false);
   const hadDocRef = useRef(false);
-  const lastQuotaWarnRef = useRef(0);
 
-  const notifyQuota = useCallback(() => {
-    const now = Date.now();
-    if (now - lastQuotaWarnRef.current > 10000) {
-      lastQuotaWarnRef.current = now;
-      d.onQuotaExceeded?.();
-    }
-  }, [d]);
-
-  const applyDoc = useCallback(
-    (next: Partial<Doc>, reset: boolean) => {
-      d.interruptPreviewRef.current();
-      const frames = Array.isArray(next.frames) ? next.frames : [];
-      if (Array.isArray(next.groups)) {
-        d.setGroups(d.migrateGroups(next.groups, frames));
-      }
-      if (Array.isArray(next.frames)) d.setFrames(next.frames);
-      if (typeof next.paletteKey === "string") d.setPaletteKey(next.paletteKey);
-      if ("customPalette" in next) d.setCustomPalette(next.customPalette ?? null);
-      if (typeof next.dynamicColor === "boolean") d.setDynamicColor(next.dynamicColor);
-      if (next.theme) d.setTheme(normalizeTheme(next.theme));
-      if (typeof next.title === "string") d.setTitle(next.title);
-      if (typeof next.brief === "string") d.setBrief(next.brief);
-      if ("promptEdit" in next) d.setPromptEdit(next.promptEdit);
-      if ("promptOptions" in next) d.setPromptOptions(next.promptOptions);
-      if (next.componentLibrary) d.setComponentLibrary(normalizeComponentLibrary(next.componentLibrary));
-      else if (reset) d.setComponentLibrary(EMPTY_COMPONENT_LIBRARY);
-      if ("platform" in next) d.setPlatform(isPlatform(next.platform) ? next.platform : null);
-    },
-    [d],
-  );
-
-  useEffect(() => {
-    try {
-      const editorId = Math.random().toString(36).slice(2);
-      const existingLock = sessionStorage.getItem(DOC_LOCK);
-      if (!existingLock) {
-        sessionStorage.setItem(DOC_LOCK, editorId);
-        d.setEditAccess("editable");
-      } else {
-        d.setEditAccess("editable");
-      }
-      const onUnload = () => {
-        if (sessionStorage.getItem(DOC_LOCK) === editorId) {
-          sessionStorage.removeItem(DOC_LOCK);
-        }
-      };
-      window.addEventListener("beforeunload", onUnload);
-      return () => {
-        window.removeEventListener("beforeunload", onUnload);
-        onUnload();
-      };
-    } catch {
-      d.setEditAccess("editable");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  /** Puts a stored or opened document into the editor. Fields a partial document
+   *  leaves out keep their current value, or go back to the default when `reset`. */
+  const applyDoc = useCallback((doc: Partial<Doc>, reset: boolean) => {
+    const d = depsRef.current;
+    d.interruptPreviewRef.current();
+    const nextFrames = Array.isArray(doc.frames) ? doc.frames : d.framesRef.current;
+    if (Array.isArray(doc.groups)) d.setGroups(d.migrateGroups(doc.groups, nextFrames));
+    if (Array.isArray(doc.frames)) d.setFrames(doc.frames);
+    if (typeof doc.paletteKey === "string" && doc.paletteKey) d.setPaletteKey(doc.paletteKey);
+    else if (reset) d.setPaletteKey("purple");
+    if (doc.customPalette && typeof doc.customPalette.primary === "string") d.setCustomPalette(paletteOf("custom", doc.customPalette));
+    else if (reset) d.setCustomPalette(null);
+    if (typeof doc.dynamicColor === "boolean") d.setDynamicColor(doc.dynamicColor);
+    else if (reset) d.setDynamicColor(false);
+    if (doc.theme && typeof doc.theme === "object") d.setTheme(normalizeTheme(doc.theme));
+    else if (reset) d.setTheme(normalizeTheme(undefined));
+    if (typeof doc.title === "string") d.setTitle(doc.title);
+    else if (reset) d.setTitle("");
+    if (typeof doc.brief === "string") d.setBrief(doc.brief);
+    else if (reset) d.setBrief("");
+    if (typeof doc.promptEdit === "string") d.setPromptEdit(doc.promptEdit);
+    else if (reset) d.setPromptEdit(undefined);
+    if (Array.isArray(doc.promptOptions)) d.setPromptOptions(doc.promptOptions);
+    else if (reset) d.setPromptOptions(undefined);
+    if (doc.componentLibrary) d.setComponentLibrary(normalizeComponentLibrary(doc.componentLibrary, `${t("customPackageDefault", depsRef.current.initialLangRef.current)} 1`));
+    else if (reset) d.setComponentLibrary(EMPTY_COMPONENT_LIBRARY);
+    if (isPlatform(doc.platform)) d.setPlatform(doc.platform);
+    else if (reset) d.setPlatform(null);
   }, []);
 
   useEffect(() => {
+    if (!navigator.locks) {
+      depsRef.current.setEditAccess("editable");
+      return;
+    }
+    let active = true;
+    let releaseLock: (() => void) | undefined;
+    queueMicrotask(() => {
+      if (!active) return;
+      void navigator.locks
+        .request(DOC_LOCK, { ifAvailable: true }, async (lock) => {
+          if (!active) return;
+          if (!lock) {
+            depsRef.current.setEditAccess("readonly");
+            return;
+          }
+          depsRef.current.setEditAccess("editable");
+          await new Promise<void>((resolve) => {
+            releaseLock = resolve;
+          });
+        })
+        .catch(() => {
+          if (active) depsRef.current.setEditAccess("editable");
+        });
+    });
+    return () => {
+      active = false;
+      releaseLock?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loadedRef.current) return;
+    const d = depsRef.current;
     try {
       const raw = localStorage.getItem(DOC_KEY);
       const restored = parseLocalDoc(raw);
       let hasDoc = false;
       if (restored.ok) {
-        applyDoc(restored.doc, false);
-        hadDocRef.current = true;
         hasDoc = true;
+        hadDocRef.current = true;
+        applyDoc(restored.doc, false);
       } else if (restored.reason === "corrupt") {
         backupCorruptDoc(restored.raw);
+        try {
+          localStorage.removeItem(DOC_KEY);
+        } catch {}
+      }
+      const before = hasDoc ? localStorage.getItem(BEFORE_KEY) : null;
+      if (!hasDoc) localStorage.removeItem(BEFORE_KEY);
+      if (before) {
+        const value: unknown = JSON.parse(before);
+        if (isProject(value)) d.setDraftBefore(value);
+        else localStorage.removeItem(BEFORE_KEY);
       }
       const u = localStorage.getItem(UI_KEY);
       if (u) {
         const ui = JSON.parse(u);
-        if (ui.lang && (ui.lang === "ja" || ui.lang === "en" || ui.lang === "zh" || ui.lang === "ko")) {
-          d.initialLang = ui.lang;
-        }
-        if (ui.view) {
-          d.setView(ui.view);
-          d.setViewReady?.(true);
-        } else {
-          queueMicrotask(() => {
-            d.fitRef.current();
-            d.setViewReady?.(true);
-          });
-        }
+        if (ui.view) d.setView(ui.view);
         if (typeof ui.leftOpen === "boolean") d.setLeftOpen(ui.leftOpen);
         if (typeof ui.rightOpen === "boolean") d.setRightOpen(ui.rightOpen);
         if (Array.isArray(ui.favorites)) d.setFavorites(ui.favorites);
         if (ui.mode) d.setMode(ui.mode);
       } else {
-        queueMicrotask(() => {
-          d.fitRef.current();
-          d.setViewReady?.(true);
-        });
+        queueMicrotask(() => d.fitRef.current());
       }
       setGlobalLang(d.initialLang);
       d.initialLangRef.current = d.initialLang;
@@ -217,36 +212,32 @@ export function useDocumentPersistence(
     } catch {}
     d.setAiSettings(loadAiSettings());
     loadedRef.current = true;
-    requestAnimationFrame(() => {
-      d.setViewReady?.(true);
-      d.onReadyRef.current?.();
-    });
+    requestAnimationFrame(() => d.onReadyRef.current?.());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!loadedRef.current || autosave.editAccess !== "editable") return;
-    const res = safeSetStorageItem(
-      DOC_KEY,
-      JSON.stringify({
-        groups: autosave.groups,
-        frames: autosave.frames,
-        paletteKey: autosave.paletteKey,
-        frame: autosave.frame,
-        title: autosave.title,
-        brief: autosave.brief,
-        promptEdit: autosave.promptEdit,
-        promptOptions: autosave.promptOptions,
-        platform: autosave.platform ?? undefined,
-        customPalette: autosave.customPalette ?? undefined,
-        dynamicColor: autosave.dynamicColor,
-        theme: autosave.theme,
-        componentLibrary: autosave.componentLibrary,
-      }),
-    );
-    if (!res.ok && res.quota) {
-      notifyQuota();
-    }
+    try {
+      localStorage.setItem(
+        DOC_KEY,
+        JSON.stringify({
+          groups: autosave.groups,
+          frames: autosave.frames,
+          paletteKey: autosave.paletteKey,
+          frame: autosave.frame,
+          title: autosave.title,
+          brief: autosave.brief,
+          promptEdit: autosave.promptEdit,
+          promptOptions: autosave.promptOptions,
+          platform: autosave.platform ?? undefined,
+          customPalette: autosave.customPalette ?? undefined,
+          dynamicColor: autosave.dynamicColor,
+          theme: autosave.theme,
+          componentLibrary: autosave.componentLibrary,
+        }),
+      );
+    } catch {}
   }, [
     autosave.editAccess,
     autosave.groups,
@@ -262,28 +253,26 @@ export function useDocumentPersistence(
     autosave.dynamicColor,
     autosave.theme,
     autosave.componentLibrary,
-    notifyQuota,
   ]);
 
   useEffect(() => {
     if (!loadedRef.current) return;
-    const res = safeSetStorageItem(
-      UI_KEY,
-      JSON.stringify({
-        view: autosave.view,
-        leftOpen: autosave.leftOpen,
-        rightOpen: autosave.rightOpen,
-        leftW: autosave.leftW,
-        rightW: autosave.rightW,
-        favorites: autosave.favorites,
-        mode: autosave.mode,
-        lang: autosave.lang,
-        boot: autosave.boot,
-      }),
-    );
-    if (!res.ok && res.quota) {
-      notifyQuota();
-    }
+    try {
+      localStorage.setItem(
+        UI_KEY,
+        JSON.stringify({
+          view: autosave.view,
+          leftOpen: autosave.leftOpen,
+          rightOpen: autosave.rightOpen,
+          leftW: autosave.leftW,
+          rightW: autosave.rightW,
+          favorites: autosave.favorites,
+          mode: autosave.mode,
+          lang: autosave.lang,
+          boot: autosave.boot,
+        }),
+      );
+    } catch {}
   }, [
     autosave.view,
     autosave.leftOpen,
@@ -294,7 +283,6 @@ export function useDocumentPersistence(
     autosave.mode,
     autosave.lang,
     autosave.boot,
-    notifyQuota,
   ]);
 
   return { applyDoc, loadedRef, hadDocRef };

@@ -345,7 +345,7 @@ export function ButtonInspector({
               {picker === "toggle" && <IconPicker value={onIcon} onChange={(icon) => setToggle({ icon })} onClose={() => setPicker("none")} palette={p} />}
             </div>
           </Section>
-          <Section id="btn-style" icon="palette" title={t("style", lang)} p={p}>
+          <Section id="btn-style" icon="palette" title={t("style", lang)} p={p} defaultOpen>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {isToggle && <StateMark on={false} p={p} title={t("normalState", lang)} />}
