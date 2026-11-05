@@ -347,7 +347,7 @@ export const UI = {
   phoneFrame: { ja: "スマホ", en: "Phone", zh: "手机" },
   desktopFrame: { ja: "デスクトップ", en: "Desktop", zh: "桌面" },
   // mobile
-  mobileNote: { ja: "フル機能は PC のブラウザで使えます", en: "Full features on a desktop browser", zh: "完整功能请在电脑浏览器中使用" },
+  mobileNote: { ja: "ウィンドウが狭いため、広げるか全画面にしてフル機能をご利用ください", en: "Window is narrow. Expand or maximize for full features", zh: "窗口过窄，展开或全屏窗口以使用完整功能" },
   addButton: { ja: "ボタンを追加", en: "Add button", zh: "添加按钮" },
   done: { ja: "完了", en: "Done", zh: "完成" },
   theme: { ja: "テーマ", en: "Theme", zh: "主题" },
@@ -485,6 +485,18 @@ export const UI = {
     en: "Could not connect. Check the URL, the network and the server's CORS settings",
     zh: "无法连接。请检查 URL、网络和服务器的 CORS 设置",
   },
+  aiKeyRequired: { ja: "API キーを入力してください", en: "Enter an API key", zh: "请输入 API 密钥" },
+  aiRememberKey: { ja: "この端末にキーを保存", en: "Remember key on this device", zh: "在此设备上记住密钥" },
+  aiRememberKeyHint: {
+    ja: "オフにすると、キーはこのセッション中だけ保持され、ブラウザを閉じると消えます。",
+    en: "Off: the key is kept only for this session and is forgotten when the browser closes.",
+    zh: "关闭后，密钥仅在本次会话中保留，关闭浏览器时即被清除。",
+  },
+  save: { ja: "保存", en: "Save", zh: "保存" },
+  paste: { ja: "貼り付け", en: "Paste", zh: "粘贴" },
+  saved: { ja: "保存済み", en: "Saved", zh: "已保存" },
+  showKey: { ja: "キーを表示", en: "Show key", zh: "显示密钥" },
+  hideKey: { ja: "キーを隠す", en: "Hide key", zh: "隐藏密钥" },
 } as const satisfies Record<string, Str>;
 
 export type UIKey = keyof typeof UI;
@@ -544,7 +556,7 @@ export const KO: Record<UIKey, string> = {
   noLayers: "이 화면에는 아직 부품이 없습니다", showParts: "안의 부품 표시", hideParts: "안의 부품 숨기기", lock: "잠금", unlock: "잠금 해제", lockedGroup: "잠긴 그룹입니다. 먼저 레이어 패널에서 잠금을 해제하세요", lockedKept: "잠긴 그룹의 부품은 삭제하지 않고 남겼습니다", lockedEdit: "잠금 중입니다. 스위치로 해제",
   brief: "이 앱에 대한 설명…", appName: "앱 이름", targetPlatform: "구현 대상", targetAndroid: "Android 네이티브 앱으로 만들기",
   targetWeb: "브라우저에서 실행되는 웹 앱으로 만들기", copyPrompt: "프롬프트 복사", back: "뒤로", close: "닫기", cancel: "취소", ok: "확인",
-  leading: "앞쪽", trailing: "뒤쪽", title: "제목", body: "본문", message: "메시지", placeholder: "자리 표시자", regular: "보통 굵기", typeBody: "본문", typeTitle: "제목", typeHeadline: "헤드라인", typeDisplay: "디스플레이", home: "홈", screenN: "화면", copySuffix: " 복사본", mobileNote: "전체 기능은 데스크톱 브라우저에서 사용할 수 있습니다",
+  leading: "앞쪽", trailing: "뒤쪽", title: "제목", body: "본문", message: "메시지", placeholder: "자리 표시자", regular: "보통 굵기", typeBody: "본문", typeTitle: "제목", typeHeadline: "헤드라인", typeDisplay: "디스플레이", home: "홈", screenN: "화면", copySuffix: " 복사본", mobileNote: "창이 좁습니다. 창을 넓히거나 최대화하여 전체 기능을 사용하세요",
   addButton: "버튼 추가", done: "완료", theme: "테마", settings: "테마 및 설정", shape: "모양", typography: "글꼴", motion: "모션",
   brightness: "밝기", light: "라이트", dark: "다크", contrast: "대비", bothModes: "둘 다", contrastStandard: "표준", contrastMedium: "중간", contrastHigh: "높음",
   design: "디자인", trigger: "트리거", noteDialog: "버튼 사양", partSpec: "이 부품의 사양", toggleLookHint: "디자인 탭에서 설정할 수 있습니다", addFrameHint: "화면을 추가하면 여기서 이동을 설정할 수 있습니다",
@@ -566,6 +578,14 @@ export const KO: Record<UIKey, string> = {
   aiSelectScreen: "먼저 화면을 선택하세요", aiNoKey: "AI 탭에 키를 입력하면 사용할 수 있습니다", aiError: "AI 요청에 실패했습니다",
   aiErrorRefusal: "모델이 답변을 거부했습니다", aiErrorJson: "모델의 응답을 읽을 수 없습니다", aiErrorLong: "답변이 너무 길어 중간에 잘렸습니다. 화면 수를 줄여 다시 시도하세요", aiErrorModel: "모델 ID를 입력하세요",
   aiErrorInsecure: "기본 URL은 https를 사용하거나 localhost를 가리켜야 합니다", aiErrorNetwork: "연결할 수 없습니다. URL, 네트워크 및 서버의 CORS 설정을 확인하세요",
+  aiKeyRequired: "API 키를 입력하세요",
+  aiRememberKey: "이 기기에 키 저장",
+  aiRememberKeyHint: "끄면 키는 이번 세션 동안만 유지되고 브라우저를 닫으면 사라집니다.",
+  save: "저장",
+  paste: "붙여넣기",
+  saved: "저장됨",
+  showKey: "키 보기",
+  hideKey: "키 숨기기",
 };
 
 /** the locale each language writes its dates in */
