@@ -66,6 +66,7 @@ import {
   sizeOf,
   isCardImagePos,
   paletteOf,
+  canvasPaletteOf,
   DEFAULT_THEME,
   CARD_MEDIA_GAP,
   CARD_PADDING,
@@ -130,15 +131,14 @@ describe("lerp / clamp / uid", () => {
     expect(clamp(11, 0, 10)).toBe(10);
   });
 
-  it("uid produces unique short base36 strings", () => {
+  it("uid produces unique high-entropy hex strings", () => {
     const a = new Set<string>();
-    for (let i = 0; i < 200; i++) a.add(uid());
-    expect(a.size).toBe(200);
+    for (let i = 0; i < 2000; i++) a.add(uid());
+    expect(a.size).toBe(2000);
     for (const id of a) {
-      // Math.random().toString(36).slice(2, 10) is at most 8 chars and can
-      // rarely come up short — assert the contract (base36, bounded, unique),
-      // not an exact length.
-      expect(id).toMatch(/^[0-9a-z]{1,8}$/);
+      // 8 random bytes rendered as hex: full 64-bit entropy, fixed width, so ids
+      // stay STABLE in shape and practically never collide inside one document.
+      expect(id).toMatch(/^[0-9a-f]{16}$/);
     }
   });
 });
@@ -341,7 +341,7 @@ describe("makeItem", () => {
   it("produces a sane default Item per kind", () => {
     const btn = makeItem("button");
     expect(btn.kind).toBe("button");
-    expect(btn.id).toMatch(/^[0-9a-z]{8}$/);
+    expect(btn.id).toMatch(/^[0-9a-f]{16}$/);
     expect(["filled", "tonal", "elevated", "outlined", "text"]).toContain(btn.variant);
   });
 
@@ -459,6 +459,15 @@ describe("card image placement helpers", () => {
     expect(cardScrimOf("#ffffff", "end")).toMatch(/^linear-gradient\(rgba\(0,0,0,0\) 40%/);
     expect(cardScrimOf("#1a1a1a", "start")).toMatch(/^linear-gradient\(rgba\(255,255,255,0\.72\)/);
     expect(cardScrimOf("#ffffff", "center")).toMatch(/^rgba\(0,0,0,/);
+  });
+
+  it("keeps canvas palette on standard contrast regardless of theme contrast", () => {
+    const light = canvasPaletteOf("purple", undefined, false);
+    const dark = canvasPaletteOf("purple", undefined, true);
+    expect(light.outlineVariant).toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, contrast: "standard" }).outlineVariant);
+    expect(light.outlineVariant).not.toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, contrast: "high" }).outlineVariant);
+    expect(dark.outlineVariant).toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, dark: true, contrast: "standard" }).outlineVariant);
+    expect(dark.outlineVariant).not.toBe(paletteOf("purple", undefined, { ...DEFAULT_THEME, dark: true, contrast: "high" }).outlineVariant);
   });
 
 });
