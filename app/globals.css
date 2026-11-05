@@ -51,6 +51,7 @@ body {
 }
 
 .no-scrollbar {
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--sb, #d6cfe0) transparent;
 }

@@ -59,6 +59,7 @@ import {
   FRAME_LABEL_H,
   FrameMode,
   frameOfGroup,
+  groupsInFrame,
   framePresetPatch,
   frameRadius,
   frameRect,
@@ -89,6 +90,7 @@ import {
   NAV_BAR_H,
   Palette,
   paletteOf,
+  canvasPaletteOf,
   PHONE_H,
   PHONE_MARGIN,
   PHONE_W,
@@ -123,10 +125,13 @@ import { GitHubLink, Mode, Toolbar } from "@/components/Toolbar";
 import { LangMenu } from "@/components/Menus";
 import { AiActionKey, AiPanel, aiErrorText } from "@/components/AiPanel";
 import { TidyState, PANEL_FADE_H } from "@/components/ui";
-import { AiSettings, DEFAULT_AI, hasKey, isSecureUrl, loadAiSettings, proposeBehavior, proposeDescription, pushHistory, saveAiSettings } from "@/lib/ai";
+import { AiSettings, DEFAULT_AI, hasKey, isSecureUrl, proposeBehavior, proposeDescription, pushHistory, saveAiSettings } from "@/lib/ai";
 import { barSlotOf, bodyRect, carryFrame, holdsEdgeBar, maxFrameLength, minFrameLength, pullInto, stretchFrame, tidyFrame } from "@/lib/tidy";
 import { constrainModalRails, modalRailOf, updateRail } from "@/lib/rail";
 import { isProject, readProject, saveProject } from "@/lib/project";
+import { BEFORE_KEY, UI_KEY, useDocumentPersistence } from "@/app/editor/useDocumentPersistence";
+import { useEditorHistory } from "@/app/editor/useEditorHistory";
+import type { Snapshot } from "@/app/editor/types";
 import { hasShareHash, readShareHash } from "@/lib/share";
 import { LoadingIndicator } from "@/components/Loading";
 import { draftDesign } from "@/lib/ai";
@@ -170,13 +175,6 @@ const MAX_Z = 3;
  *  toolbar's row at the top, a margin elsewhere */
 const GLIDE_TOP = 84;
 const GLIDE_PAD = 40;
-const HISTORY_MAX = 100;
-const DOC_KEY = "m3e:doc";
-/** the design a draft or a link replaced, until the author keeps or undoes it */
-const BEFORE_KEY = "m3e:doc:before";
-const DOC_LOCK = "m3e:doc:editor";
-const UI_KEY = "m3e:ui";
-
 type View = { x: number; y: number; z: number };
 type Snap = { groupId: string; index: number; pull: number };
 
@@ -234,11 +232,6 @@ type Gesture =
       moved: boolean;
     }
   | { kind: "group"; id: string; sx: number; sy: number; gx: number; gy: number; moved: boolean; overBin: boolean; guide?: Guide | null };
-
-/** everything in a document apart from its screens and parts */
-type DocMeta = Omit<Doc, "groups" | "frames">;
-/** an undo step: the screens and parts, plus the rest of the document for steps that replaced it all */
-type Snapshot = { groups: Group[]; frames: Frame[]; meta?: DocMeta };
 
 /** The parts a lone one of can be resized on the canvas itself: the controls that carry a size,
  *  and the indicators, whose width is the thing an author reaches for most. */
@@ -452,6 +445,7 @@ const LEFT_TABS: { key: LeftTab; icon: string; title: "parts" | "layers" | "colo
 ];
 
 export default function Editor({ initialLang, onReady }: { initialLang: Lang; onReady?: () => void }) {
+  const reducedMotion = useReducedMotion();
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   /* ---------- document ---------- */
@@ -512,6 +506,8 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [draftBefore, setDraftBefore] = useState<Doc | null>(null);
   const draftBeforeRef = useRef<Doc | null>(null);
   draftBeforeRef.current = draftBefore;
+  /** true after a kept draft until the author undoes something, so the header's undo also sits by the opener */
+  const [quickUndo, setQuickUndo] = useState(false);
   /** true for the moment after a design arrives, so its colours ease over */
   const [revealing, setRevealing] = useState(false);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -532,13 +528,23 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
-  const [leftW, setLeftW] = useState(RAIL_W + 268);
+  const leftW = RAIL_W + 244;
   const [leftTab, setLeftTab] = useState<LeftTab>("parts");
+  const titleMeasureRef = useRef<HTMLSpanElement>(null);
+  const tabTitle = t(LEFT_TABS.find((x) => x.key === leftTab)?.title ?? "parts", lang);
+  const [pillWidth, setPillWidth] = useState<number>(50);
+  useEffect(() => {
+    if (titleMeasureRef.current) {
+      setPillWidth(Math.round(titleMeasureRef.current.offsetWidth + 24));
+    } else {
+      setPillWidth(50);
+    }
+  }, [tabTitle, leftTab]);
   /** pointer over the collapsed rail: the logo becomes the open button */
   const [railHover, setRailHover] = useState(false);
   /** the screen whose layers are listed when nothing on a screen is selected */
   const [layersFrameId, setLayersFrameId] = useState<string | null>(null);
-  const [rightW, setRightW] = useState(320);
+  const rightW = 280;
   const [rightTab, setRightTab] = useState<"edit" | "prompt">("edit");
   const [favorites, setFavorites] = useState<Kind[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -549,8 +555,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const [drag, setDrag] = useState<DragState | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>({});
-  const [resizing, setResizing] = useState<"left" | "right" | null>(null);
-  const [, bumpHistory] = useState(0);
   /* ---------- tidy and ai ---------- */
   /** the groups before and after the last tidy; "undo" is offered only while the after-state is still current */
   const tidyRef = useRef<{ frameId: string; before: Group[]; after: Group[] } | null>(null);
@@ -565,6 +569,11 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const aiAbortRef = useRef<AbortController | null>(null);
 
   const p = useMemo(() => paletteOf(paletteKey, customPalette, theme), [paletteKey, customPalette, theme]);
+  /** The canvas background and dot grid keep standard contrast so adjusting contrast doesn't affect the workspace. */
+  const canvasPalette = useMemo(
+    () => canvasPaletteOf(paletteKey, customPalette, theme.dark),
+    [paletteKey, customPalette, theme.dark],
+  );
   /* corner helpers read the shape scale outside React; keep it current before anything renders */
   setGlobalShape(theme.shape);
 
@@ -609,321 +618,93 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   } | null>(null);
   /** groups that must reposition without animating on the next render */
   const instantRef = useRef<Set<string>>(new Set());
-  const loadedRef = useRef(false);
   const initialLangRef = useRef<Lang>(initialLang);
-  /** A saved document or the first viewport initialization prevents later reseeding. */
-  const hadDocRef = useRef(false);
+  const interruptPreviewRef = useRef<() => void>(() => {});
+  /* fit / doc / ensureFrame refs are assigned once their implementations exist further down */
+  const fitRef = useRef<(animate?: boolean) => void>(() => {});
+  /** set while fit() writes the camera, so a resize observer does not immediately shove that view aside */
+  const suppressViewShiftRef = useRef(false);
+  const ensureFrameRef = useRef<() => void>(() => {});
+  const docRef = useRef<Doc>(null!);
 
-  /* ---------- history ---------- */
-  const pastRef = useRef<Snapshot[]>([]);
-  const futureRef = useRef<Snapshot[]>([]);
-  const lastPatchRef = useRef<{ key: string; at: number }>({ key: "", at: 0 });
-
-  const snapshot = useCallback((withMeta = false) => {
-    lastPatchRef.current = { key: "", at: 0 };
-    setQuickUndo(false);
-    pastRef.current.push(current(withMeta));
-    if (pastRef.current.length > HISTORY_MAX) pastRef.current.shift();
-    futureRef.current = [];
-    bumpHistory((v) => v + 1);
-  }, []);
-
-  /** consecutive edits of the same field collapse into one undo step */
-  const snapshotFor = useCallback(
-    (key: string) => {
-      const now = Date.now();
-      const last = lastPatchRef.current;
-      if (last.key !== key || now - last.at > 800) snapshot();
-      lastPatchRef.current = { key, at: now };
+  const { applyDoc, loadedRef, hadDocRef } = useDocumentPersistence(
+    {
+      initialLang,
+      initialLangRef,
+      onReadyRef,
+      interruptPreviewRef,
+      fitRef,
+      framesRef,
+      migrateGroups,
+      seed,
+      seedFrames: (lang) => [{ ...SEED_FRAMES[0], name: t("home", lang) }],
+      setGroups,
+      setFrames,
+      setPaletteKey,
+      setCustomPalette,
+      setDynamicColor,
+      setTheme,
+      setTitle,
+      setBrief,
+      setPromptEdit,
+      setPromptOptions,
+      setPlatform,
+      setDraftBefore,
+      setAiSettings,
+      setView,
+      setLeftOpen,
+      setRightOpen,
+      setFavorites,
+      setMode,
+      setEditAccess,
     },
-    [snapshot],
+    {
+      editAccess,
+      groups,
+      frames,
+      paletteKey,
+      frame,
+      title,
+      brief,
+      promptEdit,
+      promptOptions,
+      platform,
+      customPalette,
+      dynamicColor,
+      theme,
+      view,
+      leftOpen,
+      rightOpen,
+      leftW,
+      rightW,
+      favorites,
+      mode,
+      lang,
+      boot: {
+        surface: p.surface,
+        container: p.surfaceContainer,
+        low: p.surfaceContainerLow,
+        high: p.surfaceContainerHigh,
+        primary: p.primary,
+        canvas: frame === "phone" ? canvasPalette.surfaceContainerLow : "#ffffff",
+      },
+    },
   );
 
-  const restore = (snap: Snapshot) => {
-    lastPatchRef.current = { key: "", at: 0 };
-    for (const g of snap.groups) instantRef.current.add(g.id);
-    if (snap.meta) {
-      applyDoc({ ...snap.meta, groups: snap.groups, frames: snap.frames }, true);
-      if (!mobileRef.current) {
-        const mode = snap.meta.frame === "blank" ? "blank" : "phone";
-        setFrame(mode);
-        frameRef.current = mode;
-      }
-    } else {
-      setGroups(snap.groups);
-      setFrames(snap.frames);
-    }
-    bumpHistory((v) => v + 1);
-  };
-
-  /** the current step as a snapshot; `withMeta` when the step being crossed replaced the whole document */
-  const current = (withMeta: boolean): Snapshot => {
-    const { groups: _g, frames: _f, ...meta } = docRef.current;
-    return { groups: groupsRef.current, frames: framesRef.current, meta: withMeta ? meta : undefined };
-  };
-
-  const undo = useCallback(() => {
-    setQuickUndo(false);
-    const prev = pastRef.current.pop();
-    if (!prev) return;
-    futureRef.current.push(current(!!prev.meta));
-    restore(prev);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const redo = useCallback(() => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    pastRef.current.push(current(!!next.meta));
-    restore(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    instantRef.current.clear();
+  /* ---------- history ---------- */
+  const { pastRef, futureRef, lastPatchRef, snapshot, snapshotFor, undo, redo } = useEditorHistory({
+    groupsRef,
+    framesRef,
+    docRef,
+    frameRef,
+    mobileRef,
+    instantRef,
+    setGroups,
+    setFrames,
+    setFrame,
+    setQuickUndo,
+    applyDoc,
   });
-
-  /* ---------- persistence ---------- */
-  useEffect(() => {
-    /* The first tab keeps this promise pending for its lifetime. Later tabs get
-       `null` immediately and stay read-only until they are reloaded. Where the
-       browser has no locks (an insecure origin, an old WebKit) the editor works
-       as it always did, without the guard. */
-    if (!navigator.locks) {
-      setEditAccess("editable");
-      return;
-    }
-    let active = true;
-    let releaseLock: (() => void) | undefined;
-    /* Wait until React has finished its development-only effect replay. This
-       prevents the discarded setup from briefly competing with the real one. */
-    queueMicrotask(() => {
-      if (!active) return;
-      void navigator.locks
-        .request(DOC_LOCK, { ifAvailable: true }, async (lock) => {
-          if (!active) return;
-          if (!lock) {
-            setEditAccess("readonly");
-            return;
-          }
-          setEditAccess("editable");
-          await new Promise<void>((resolve) => {
-            releaseLock = resolve;
-          });
-        })
-        .catch(() => {
-          if (active) setEditAccess("editable");
-        });
-    });
-    return () => {
-      active = false;
-      releaseLock?.();
-    };
-  }, []);
-
-  /** Puts a stored or opened document into the editor. Fields a partial document
-   *  leaves out keep their current value, or go back to the default when `reset`. */
-  const applyDoc = (doc: Partial<Doc>, reset: boolean) => {
-    // A document can arrive during the opening glide, before previewId is set. The
-    // screen the glide was heading for belongs to the replaced document, so the pending
-    // opening is dropped and the camera returns; an open preview simply closes.
-    if (previewTimer.current !== null) abandonPreview();
-    else {
-      /* a return still on its way would drag the camera off the new document's fit */
-      cancelReturn();
-      if (previewIdRef.current !== null) {
-        setPreviewId(null);
-        viewBeforePreview.current = null;
-      }
-    }
-    const frames = Array.isArray(doc.frames) ? doc.frames : framesRef.current;
-    if (Array.isArray(doc.groups)) setGroups(migrateGroups(doc.groups, frames));
-    if (Array.isArray(doc.frames)) setFrames(doc.frames);
-    if (typeof doc.paletteKey === "string" && doc.paletteKey) setPaletteKey(doc.paletteKey);
-    else if (reset) setPaletteKey("purple");
-    /* normalize once so a scheme saved before the secondary role gets it and keeps it on re-save */
-    if (doc.customPalette && typeof doc.customPalette.primary === "string") setCustomPalette(paletteOf("custom", doc.customPalette));
-    else if (reset) setCustomPalette(null);
-    if (typeof doc.dynamicColor === "boolean") setDynamicColor(doc.dynamicColor);
-    else if (reset) setDynamicColor(false);
-    if (doc.theme && typeof doc.theme === "object") setTheme(normalizeTheme(doc.theme));
-    else if (reset) setTheme(normalizeTheme(undefined));
-    if (typeof doc.title === "string") setTitle(doc.title);
-    else if (reset) setTitle("");
-    if (typeof doc.brief === "string") setBrief(doc.brief);
-    else if (reset) setBrief("");
-    if (typeof doc.promptEdit === "string") setPromptEdit(doc.promptEdit);
-    else if (reset) setPromptEdit(undefined);
-    if (Array.isArray(doc.promptOptions)) setPromptOptions(doc.promptOptions);
-    else if (reset) setPromptOptions(undefined);
-    if (isPlatform(doc.platform)) setPlatform(doc.platform);
-    else if (reset) setPlatform(null);
-  };
-
-  useEffect(() => {
-    // React's development double-run would otherwise read back its own first save
-    if (loadedRef.current) return;
-    try {
-      const d = localStorage.getItem(DOC_KEY);
-      if (d) {
-        hadDocRef.current = true;
-        applyDoc(JSON.parse(d) as Partial<Doc>, false);
-        // frame mode is decided by the device (media-query effect), not restored
-      }
-      const before = d ? localStorage.getItem(BEFORE_KEY) : null;
-      if (!d) localStorage.removeItem(BEFORE_KEY);
-      if (before) {
-        const value: unknown = JSON.parse(before);
-        if (isProject(value)) setDraftBefore(value);
-        else localStorage.removeItem(BEFORE_KEY);
-      }
-      const u = localStorage.getItem(UI_KEY);
-      if (u) {
-        const ui = JSON.parse(u);
-        if (ui.view) setView(ui.view);
-        if (typeof ui.leftOpen === "boolean") setLeftOpen(ui.leftOpen);
-        if (typeof ui.rightOpen === "boolean") setRightOpen(ui.rightOpen);
-        if (ui.leftW) setLeftW(Math.max(RAIL_W + 244, ui.leftW));
-        if (ui.rightW) setRightW(ui.rightW);
-        if (Array.isArray(ui.favorites)) setFavorites(ui.favorites);
-        if (ui.mode) setMode(ui.mode);
-      } else {
-        queueMicrotask(() => fitRef.current());
-      }
-      setGlobalLang(initialLang);
-      initialLangRef.current = initialLang;
-      if (!d) {
-        setGroups(seed(initialLang));
-        setFrames([{ ...SEED_FRAMES[0], name: t("home", initialLang) }]);
-      }
-    } catch {}
-    setAiSettings(loadAiSettings());
-    loadedRef.current = true;
-    /* the document is in state; one frame later it is on screen and the boot overlay may go.
-       Not cancelled on cleanup: the development double-run skips this effect the second time. */
-    requestAnimationFrame(() => onReadyRef.current?.());
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.lang = lang;
-    /* the editor's own text and the parts both pick up the language's Noto face */
-    document.body.style.fontFamily = uiFontFamily(lang);
-    ensureLangFontLoaded(lang, () => setWidths({}));
-  }, [lang]);
-
-  useEffect(() => {
-    /* an empty width map makes every measured part read its width again in the new face */
-    ensureFontLoaded(theme.font, () => setWidths({}));
-  }, [theme.font]);
-
-  /* the page background outside the app root follows the scheme, so dark mode has no white edges */
-  useEffect(() => {
-    document.body.style.background = p.surface;
-    document.body.style.color = p.onSurface;
-  }, [p.surface, p.onSurface]);
-
-  /* in-app browsers size the page behind their own toolbars and may ignore dvh,
-     so the measured inner height wins over the CSS height (innerHeight, not the
-     visual viewport, so pinch-zoom and the keyboard leave the layout alone) */
-  useEffect(() => {
-    const apply = () => {
-      const h = Math.round(window.innerHeight);
-      if (h > 0) document.documentElement.style.setProperty("--app-h", `${h}px`);
-    };
-    /* in-app browsers (X, Instagram, LINE...) keep their own action bar over the
-       page bottom, so the controls sit one button higher there. App names in the
-       user agent are unreliable; the embedded web view itself is not: iOS web
-       views omit the Safari token and Android ones carry "wv" */
-    const ua = navigator.userAgent;
-    const iosWebView = /iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua);
-    const androidWebView = /Android/.test(ua) && /(?:^|\W)wv(?:\W|$)/.test(ua);
-    if (iosWebView || androidWebView || /Twitter|Instagram|FBAN|FBAV|Line\//i.test(ua)) {
-      document.documentElement.style.setProperty("--bottom-ui", "64px");
-    }
-    apply();
-    window.addEventListener("resize", apply);
-    window.addEventListener("orientationchange", apply);
-    return () => {
-      window.removeEventListener("resize", apply);
-      window.removeEventListener("orientationchange", apply);
-    };
-  }, []);
-
-  /* everyone works on phone screens; a phone gets one fixed screen and the select tool only */
-  useEffect(() => {
-    const mq = window.matchMedia(
-      "(max-width: 840px), (pointer: coarse) and (max-width: 1024px)",
-    );
-    const apply = () => {
-      const m = mq.matches;
-      setIsMobile(m);
-      mobileRef.current = m;
-      if (m) {
-        setMode("select");
-        setSheet(null);
-        if (!hadDocRef.current) {
-          hadDocRef.current = true;
-          setGroups(mobileSeed(initialLangRef.current));
-          setFrames([{ id: uid(), name: t("home", initialLangRef.current), x: 0, y: 0 }]);
-        }
-      }
-      hadDocRef.current = true;
-      if (frameRef.current !== "phone") {
-        setFrame("phone");
-        frameRef.current = "phone";
-      }
-      ensureFrameRef.current();
-      queueMicrotask(() => {
-        fitRef.current();
-        setViewReady(true);
-      });
-    };
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
-
-  useEffect(() => {
-    if (!loadedRef.current || editAccess !== "editable") return;
-    try {
-      localStorage.setItem(
-        DOC_KEY,
-        JSON.stringify({ groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform: platform ?? undefined, customPalette: customPalette ?? undefined, dynamicColor, theme }),
-      );
-    } catch {}
-  }, [editAccess, groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme]);
-
-  useEffect(() => {
-    if (!loadedRef.current) return;
-    try {
-      localStorage.setItem(
-        UI_KEY,
-        JSON.stringify({
-          view,
-          leftOpen,
-          rightOpen,
-          leftW,
-          rightW,
-          favorites,
-          mode,
-          lang,
-          /* the theme's surfaces, so the shell drawn before the editor loads is already this colour */
-          boot: { surface: p.surface, container: p.surfaceContainer, low: p.surfaceContainerLow, high: p.surfaceContainerHigh, primary: p.primary, canvas: frame === "phone" ? p.surfaceContainerLow : "#ffffff" },
-        }),
-      );
-    } catch {}
-  }, [
-    view,
-    leftOpen,
-    rightOpen,
-    leftW,
-    rightW,
-    p,
-    frame,
-    favorites,
-    mode,
-    lang,
-  ]);
 
   /* ---------- measurement (text-sized kinds) ---------- */
   const allItems = useMemo(() => {
@@ -971,6 +752,129 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     return () => document.fonts?.removeEventListener("loadingdone", refreshWidths);
   }, []);
 
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    /* the editor's own text and the parts both pick up the language's Noto face */
+    document.body.style.fontFamily = uiFontFamily(lang);
+    ensureLangFontLoaded(lang, () => setWidths({}));
+  }, [lang]);
+
+  useEffect(() => {
+    /* an empty width map makes every measured part read its width again in the new face */
+    ensureFontLoaded(theme.font, () => setWidths({}));
+  }, [theme.font]);
+
+  /* the page background outside the app root follows the scheme, so dark mode has no white edges */
+  useEffect(() => {
+    document.body.style.background = p.surface;
+    document.body.style.color = p.onSurface;
+  }, [p.surface, p.onSurface]);
+
+  /* in-app browsers size the page behind their own toolbars and may ignore dvh,
+     so the measured inner height wins over the CSS height (innerHeight, not the
+     visual viewport, so pinch-zoom and the keyboard leave the layout alone) */
+  useEffect(() => {
+    const apply = () => {
+      const h = Math.round(window.innerHeight);
+      if (h > 0) document.documentElement.style.setProperty("--app-h", `${h}px`);
+    };
+    /* in-app browsers (X, Instagram, LINE...) keep their own action bar over the
+       page bottom, so the controls sit one button higher there. App names in the
+       user agent are unreliable; the embedded web view itself is not: iOS web
+       views omit the Safari token and Android ones carry "wv" */
+    const ua = navigator.userAgent;
+    const iosWebView = /iPhone|iPad|iPod/.test(ua) && !/Safari\//.test(ua);
+    const androidWebView = /Android/.test(ua) && /(?:^|\W)wv(?:\W|$)/.test(ua);
+    if (iosWebView || androidWebView || /Twitter|Instagram|FBAN|FBAV|Line\//i.test(ua)) {
+      document.documentElement.style.setProperty("--bottom-ui", "64px");
+    }
+    apply();
+    window.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", apply);
+    };
+  }, []);
+
+  /* everyone works on phone screens; a phone gets one fixed screen and the select tool only.
+     This effect also reveals the canvas after the first fit — without setViewReady the
+     world stays visibility:hidden forever. */
+  useEffect(() => {
+    const mqFine = window.matchMedia("(pointer: fine)");
+    const mqCoarse = window.matchMedia("(pointer: coarse)");
+    let prevW = window.innerWidth;
+
+    // Initial check on mount: if on desktop in split-screen (< 960px) and no explicit saved UI, collapse right sidebar
+    if (mqFine.matches && window.innerWidth < 960) {
+      try {
+        const u = localStorage.getItem(UI_KEY);
+        if (!u || typeof JSON.parse(u)?.rightOpen !== "boolean") {
+          setRightOpen(false);
+        }
+      } catch {}
+    }
+
+    const computeIsMobile = () => {
+      const isFine = mqFine.matches;
+      // For desktop (mouse/trackpad): do not treat as mobile even when split-screen (e.g. 640px~960px).
+      // Only treat as mobile if window is extremely narrow (< 640px).
+      if (isFine) {
+        return window.innerWidth < 640;
+      }
+      // For touch-only devices: mobile breakpoint lowered to 640px (phones) or coarse pointer <= 768px.
+      return window.innerWidth < 640 || (mqCoarse.matches && window.innerWidth <= 768);
+    };
+
+    let fitted = false;
+    const apply = () => {
+      const w = window.innerWidth;
+      // Auto-collapse right panel if desktop window is resized below 960px to preserve canvas room
+      if (mqFine.matches && w < 960 && prevW >= 960) {
+        setRightOpen(false);
+      }
+      prevW = w;
+
+      const m = computeIsMobile();
+      const modeChanged = !fitted || mobileRef.current !== m;
+      fitted = true;
+      setIsMobile(m);
+      mobileRef.current = m;
+      if (m) {
+        setMode("select");
+        setSheet(null);
+        if (!hadDocRef.current) {
+          hadDocRef.current = true;
+          setGroups(mobileSeed(initialLangRef.current));
+          setFrames([{ id: uid(), name: t("home", initialLangRef.current), x: 0, y: 0 }]);
+        }
+      }
+      hadDocRef.current = true;
+      if (frameRef.current !== "phone") {
+        setFrame("phone");
+        frameRef.current = "phone";
+      }
+      ensureFrameRef.current();
+      queueMicrotask(() => {
+        /* fit only on the first reveal and when phone/desktop mode changes.
+           every resize also notifies the canvas ResizeObserver, which keeps the
+           current center; fitting again here would apply that shift on top of a
+           freshly centered camera and walk the screens off the canvas. */
+        if (modeChanged) fitRef.current();
+        setViewReady(true);
+      });
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    mqFine.addEventListener("change", apply);
+    mqCoarse.addEventListener("change", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      mqFine.removeEventListener("change", apply);
+      mqCoarse.removeEventListener("change", apply);
+    };
+  }, []);
+
   const sizeRef = useCallback((it: Item) => sizeOf(it, widthsRef.current), []);
   const alongRef = useCallback(
     (it: Item, axis: Axis) => (axis === "x" ? sizeRef(it).w : sizeRef(it).h),
@@ -1013,9 +917,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     });
   }, []);
 
-  const fit = useCallback(() => {
+  const fit = useCallback((animate = false) => {
     const r = canvasRect();
-    if (!r) return;
+    if (!r || r.width <= 0 || r.height <= 0) return;
     const gs = groupsRef.current;
     let x0 = -BEZEL;
     let y0 = -BEZEL - FRAME_LABEL_H;
@@ -1050,29 +954,76 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     const pad = mobile ? 14 : 40;
     const top = mobile ? 96 : 84; // keep the floating toolbar clear of the frame
     const bottom = mobile ? 96 : pad;
+    let nextView: View;
     if (mobile) {
       // a phone zooms to the screen's width and starts at its top; the rest scrolls
       const z = clamp((r.width - pad * 2) / (x1 - x0), MIN_Z, MAX_Z);
-      setView({ x: (r.width - (x1 - x0) * z) / 2 - x0 * z, y: top - y0 * z, z });
-      return;
+      nextView = { x: (r.width - (x1 - x0) * z) / 2 - x0 * z, y: top - y0 * z, z };
+    } else {
+      const z = clamp(
+        Math.min(
+          (r.width - pad * 2) / (x1 - x0),
+          (r.height - top - bottom) / (y1 - y0),
+          1,
+        ),
+        MIN_Z,
+        MAX_Z,
+      );
+      nextView = {
+        x: (r.width - (x1 - x0) * z) / 2 - x0 * z,
+        y: top + (r.height - top - bottom - (y1 - y0) * z) / 2 - y0 * z,
+        z,
+      };
     }
-    const z = clamp(
-      Math.min(
-        (r.width - pad * 2) / (x1 - x0),
-        (r.height - top - bottom) / (y1 - y0),
-        1,
-      ),
-      MIN_Z,
-      MAX_Z,
-    );
-    setView({
-      x: (r.width - (x1 - x0) * z) / 2 - x0 * z,
-      y: top + (r.height - top - bottom - (y1 - y0) * z) / 2 - y0 * z,
-      z,
+    suppressViewShiftRef.current = true;
+    queueMicrotask(() => {
+      suppressViewShiftRef.current = false;
     });
+    if (animate) {
+      setCameraEasing(true);
+      setView(nextView);
+      window.setTimeout(() => setCameraEasing(false), SETTLE_MS + 40);
+    } else {
+      setView(nextView);
+    }
   }, []);
-  const fitRef = useRef(fit);
   fitRef.current = fit;
+
+  /* Automatically adjust canvas viewport on container resize */
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let prevW = 0;
+    let prevH = 0;
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width <= 0 || height <= 0) return;
+      if (Math.abs(width - prevW) < 1 && Math.abs(height - prevH) < 1) return;
+      const hadSize = prevW > 0 && prevH > 0;
+      const dw = width - prevW;
+      const dh = height - prevH;
+      prevW = width;
+      prevH = height;
+
+      if (!hadSize) {
+        fitRef.current();
+        return;
+      }
+      if (suppressViewShiftRef.current || gestureRef.current !== null || dragRef.current?.active) return;
+      // Shift viewport center by delta, preserving user's manual zoom
+      setView((cur) => ({
+        ...cur,
+        x: cur.x + dw / 2,
+        y: cur.y + dh / 2,
+      }));
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+    };
+  }, []);
 
   /* touch: two fingers pinch-zoom and pan, cancelling whatever one finger started */
   const onTouchCapture = (e: React.PointerEvent) => {
@@ -1608,7 +1559,9 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             ? gr
             : {
                 ...gr,
-                items: gr.items.map((it) => (it.id !== d.id ? it : { ...it, ...sizePatch(it, d, v) })),
+                items: gr.items.map((it) =>
+                  it.id === d.id ? { ...it, ...sizePatch(it, d, v) } : it,
+                ),
               },
         ),
       );
@@ -2073,21 +2026,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isGesturing]);
 
-  /* ---------- panel resize ---------- */
-  useEffect(() => {
-    if (!resizing) return;
-    const move = (e: PointerEvent) => {
-      if (resizing === "left") setLeftW(clamp(e.clientX, RAIL_W + 244, 480));
-      else setRightW(clamp(window.innerWidth - e.clientX, 280, 480));
-    };
-    const up = () => setResizing(null);
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [resizing]);
 
   /* ---------- editing ---------- */
   const primaryId = selectedIds[selectedIds.length - 1] ?? null;
@@ -2521,18 +2459,29 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
 
   const clearAll = () => {
     setConfirmClear(false);
-    if (groupsRef.current.length === 0 && framesRef.current.length === 0)
-      return;
+    hadDocRef.current = true;
     setDraftBefore(null);
     setQuickUndo(false);
     try {
       localStorage.removeItem(BEFORE_KEY);
     } catch {}
-    snapshot();
+    snapshot(true);
+    const newFrame: Frame = { id: uid(), name: t("home", lang), x: 0, y: 0 };
+    framesRef.current = [newFrame];
+    groupsRef.current = [];
     setGroups([]);
-    setFrames([]);
+    setFrames([newFrame]);
+    if (frameRef.current !== "phone") {
+      setFrame("phone");
+      frameRef.current = "phone";
+    }
     setSelectedIds([]);
     setSelectedFrameId(null);
+    setSelectedLinkId(null);
+    queueMicrotask(() => {
+      fitRef.current();
+      requestAnimationFrame(() => fitRef.current());
+    });
   };
 
   /** Opening a project file replaces the canvas with the same restore path the saved
@@ -2630,7 +2579,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     }
   };
   /** true after a kept draft until the author undoes something, so the header's undo also sits by the opener */
-  const [quickUndo, setQuickUndo] = useState(false);
   const keepDraft = () => {
     setDraftBefore(null);
     setQuickUndo(true);
@@ -2724,7 +2672,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     setFrames([f]);
   };
 
-  const ensureFrameRef = useRef(() => {});
   ensureFrameRef.current = ensureFrame;
 
   /** A palette tile chosen without a pointer, and the phone's plus button, drop a part where
@@ -3296,6 +3243,16 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     viewBeforePreview.current = null;
     if (back) glide(back);
   };
+  interruptPreviewRef.current = () => {
+    if (previewTimer.current !== null) abandonPreview();
+    else {
+      cancelReturn();
+      if (previewIdRef.current !== null) {
+        setPreviewId(null);
+        viewBeforePreview.current = null;
+      }
+    }
+  };
   const closePreview = () => {
     setPreviewId(null);
     const back = viewBeforePreview.current;
@@ -3477,7 +3434,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
     [groups, frames, paletteKey, frame, title, brief, promptEdit, promptOptions, platform, customPalette, dynamicColor, theme],
   );
   /** the same document, for callbacks that were created on an earlier render */
-  const docRef = useRef(doc);
   docRef.current = doc;
 
   /** arrows from tappable parts to the frames they open */
@@ -3856,7 +3812,11 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
   const handMode = !isMobile && (mode === "hand" || spaceHeld);
   const panning = gesture?.kind === "pan";
   const marquee = gesture?.kind === "marquee" && gesture.moved ? gesture : null;
-  const canvasBg = frame === "phone" ? p.surfaceContainerLow : "#ffffff";
+  const canvasBg = frame === "phone" ? canvasPalette.surfaceContainerLow : "#ffffff";
+  /** A 16dp world-space dot grid follows the camera, so panning and zooming feel spatial. */
+  const gridStep = 16 * view.z;
+  const gridX = ((view.x % gridStep) + gridStep) % gridStep;
+  const gridY = ((view.y % gridStep) + gridStep) % gridStep;
 
   const panelStyle: React.CSSProperties = {
     background: p.surface,
@@ -3894,8 +3854,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
           display: "flex",
           overflow: "hidden",
           background: p.surfaceContainer,
-          cursor: resizing ? "col-resize" : undefined,
-          userSelect: resizing ? "none" : undefined,
           ["--sb" as string]: p.outlineVariant,
         }}
       >
@@ -4062,19 +4020,29 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 </div>
               )}
               <div style={{ height: 6 }} />
-              {LEFT_TABS.map((tab, i) => (
-                <div key={tab.key} style={{ marginTop: i === 2 || i === 6 ? 10 : 0 }}>
-                  <IconBtn
-                    icon={tab.icon}
-                    p={p}
-                    on={leftOpen && leftTab === tab.key}
-                    onClick={() => {
-                      setLeftTab(tab.key);
-                      setLeftOpen(true);
-                    }}
-                    title={t(tab.title, lang)}
-                    size={44}
-                  />
+              {LEFT_TABS.map((tab) => (
+                <div key={tab.key} style={{ position: "relative" }}>
+                  {leftOpen && leftTab === tab.key && (
+                    <motion.div
+                      layoutId="left-rail-selection"
+                      transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 38, mass: 0.72 }}
+                      style={{ position: "absolute", inset: 0, borderRadius: 22, background: p.secondaryContainer, pointerEvents: "none" }}
+                    />
+                  )}
+                  <div style={{ position: "relative", zIndex: 1 }}>
+                    <IconBtn
+                      icon={tab.icon}
+                      p={p}
+                      on={leftOpen && leftTab === tab.key}
+                      transparentOn
+                      onClick={() => {
+                        setLeftTab(tab.key);
+                        setLeftOpen(true);
+                      }}
+                      title={t(tab.title, lang)}
+                      size={44}
+                    />
+                  </div>
                 </div>
               ))}
               <div style={{ flex: 1 }} onClick={() => !leftOpen && setLeftOpen(true)} />
@@ -4092,15 +4060,62 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 }}
               >
                 <span
+                  ref={titleMeasureRef}
+                  aria-hidden
                   style={{
+                    position: "fixed",
+                    left: -9999,
+                    top: -9999,
+                    visibility: "hidden",
+                    pointerEvents: "none",
+                    whiteSpace: "nowrap",
+                    fontSize: 13,
                     fontWeight: 700,
-                    fontSize: 14,
-                    color: p.onSurface,
-                    flex: 1,
                   }}
                 >
-                  {t(LEFT_TABS.find((x) => x.key === leftTab)?.title ?? "parts", lang)}
+                  {tabTitle}
                 </span>
+                <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
+                  <motion.div
+                    animate={{ width: pillWidth }}
+                    transition={reducedMotion ? { duration: 0 } : { type: "spring", stiffness: 460, damping: 34 }}
+                    style={{
+                      height: 28,
+                      borderRadius: 14,
+                      background: p.secondaryContainer,
+                      color: p.onSecondaryContainer,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "flex-start",
+                      paddingLeft: 12,
+                      paddingRight: 12,
+                      boxSizing: "border-box",
+                      position: "relative",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <AnimatePresence mode="wait" initial={false}>
+                      <motion.span
+                        key={leftTab}
+                        initial={reducedMotion ? { opacity: 0 } : { y: 10, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={reducedMotion ? { opacity: 0 } : { y: -10, opacity: 0 }}
+                        transition={{ duration: 0.14, ease: [0.2, 0, 0, 1] }}
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 13,
+                          color: p.onSecondaryContainer,
+                          whiteSpace: "nowrap",
+                          lineHeight: "28px",
+                          display: "inline-block",
+                          textAlign: "left",
+                        }}
+                      >
+                        {tabTitle}
+                      </motion.span>
+                    </AnimatePresence>
+                  </motion.div>
+                </div>
                 <IconBtn
                   icon="left_panel_close"
                   p={p}
@@ -4140,7 +4155,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                 ) : leftTab === "motion" ? (
                   <MotionPanel p={p} theme={theme} onChange={patchTheme} />
                 ) : leftTab === "ai" ? (
-                  <AiPanel p={p} settings={aiSettings} onSettings={updateAiSettings} />
+                  <AiPanel p={p} settings={aiSettings} onSettings={updateAiSettings} onToast={showToast} />
                 ) : (
                   <LayersPanel
                     p={p}
@@ -4171,23 +4186,6 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
               </div>
             </div>
             )}
-            {leftOpen && (
-            <div
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setResizing("left");
-              }}
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                right: -3,
-                width: 6,
-                cursor: "col-resize",
-                zIndex: 5,
-              }}
-            />
-            )}
           </aside>
         )}
 
@@ -4209,7 +4207,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
               inset: isMobile ? 6 : 8,
               overflow: "hidden",
               borderRadius: 24,
-              background: canvasBg,
+              backgroundColor: canvasBg,
+              backgroundImage: `radial-gradient(circle, ${canvasPalette.outlineVariant} 1px, transparent 1.25px)`,
+              backgroundSize: `${gridStep}px ${gridStep}px`,
+              backgroundPosition: `${gridX}px ${gridY}px`,
               cursor: panning ? "grabbing" : handMode ? "grab" : "default",
               touchAction: "none",
             }}
@@ -4376,10 +4377,10 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                     key={selected.id}
                     /* one measure, so the part is held by the points around it rather than by
                      * its edges: a circle's diameter, a label's height */
-                    round={ROUND.has(selected.kind)}
+                    round={ROUND.has((selected).kind)}
                     /* a bar and a slider have a width and nothing else: they are held by their two
                      * ends; a carousel is the other way about and is held by its top and bottom */
-                    sides={WIDE.has(selected.kind) ? BAR_SIDES : TALL.has(selected.kind) ? TALL_SIDES : undefined}
+                    sides={WIDE.has((selected).kind) ? BAR_SIDES : TALL.has((selected).kind) ? TALL_SIDES : undefined}
                     /* a part with a height of its own is held by all four edges; one whose height follows its kind by its two ends */
                     box={{ l: b.l + sx, t: b.t + sy, r: b.r + sx, b: b.b + sy }}
                     z={view.z}
@@ -4568,7 +4569,14 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             onUndo={undo}
             onRedo={redo}
             onClear={() => {
-              if (groupsRef.current.length || framesRef.current.length) setConfirmClear(true);
+              const gs = groupsRef.current;
+              const fs = framesRef.current;
+              const isAlreadyEmpty = gs.length === 0 && fs.length === 1 && fs[0].x === 0 && fs[0].y === 0 && !fs[0].length;
+              if (isAlreadyEmpty) {
+                fit();
+                return;
+              }
+              if (gs.length || fs.length) setConfirmClear(true);
             }}
             onAddFrame={addFrame}
             onPreview={() => openPreview()}
@@ -4708,40 +4716,43 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
             </div>
           )}
 
-          {!rightOpen && !isMobile && (
-            <div
-              style={{ position: "absolute", right: 20, top: 20, zIndex: 45 }}
-            >
-              <IconBtn
-                icon="right_panel_open"
-                p={p}
-                on
-                onClick={() => setRightOpen(true)}
-                title={t("edit", lang)}
-                size={44}
-              />
-            </div>
-          )}
+          <AnimatePresence>
+            {!rightOpen && !isMobile && (
+              <motion.div
+                key="reopen-right"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ duration: 0.18, ease: [0.2, 0, 0, 1] }}
+                style={{ position: "absolute", right: 20, top: 20, zIndex: 45 }}
+              >
+                <IconBtn
+                  icon="right_panel_open"
+                  p={p}
+                  on
+                  onClick={() => setRightOpen(true)}
+                  title={t("edit", lang)}
+                  size={44}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </main>
 
         {/* ---- right: inspector / prompt ---- */}
-        {showRight && (
-          <aside style={{ ...panelStyle, width: rightW }}>
-            <div
-              onPointerDown={(e) => {
-                e.preventDefault();
-                setResizing("right");
-              }}
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: -3,
-                width: 6,
-                cursor: "col-resize",
-                zIndex: 5,
-              }}
-            />
+        {!isMobile && (
+          <aside
+            style={{
+              ...panelStyle,
+              width: rightOpen ? rightW : 0,
+              flexShrink: 0,
+              overflow: "hidden",
+              transition: "width 260ms cubic-bezier(0.2, 0, 0, 1)",
+              pointerEvents: rightOpen ? undefined : "none",
+            }}
+            inert={!rightOpen || undefined}
+          >
+            <div style={{ width: rightW, height: "100%", display: "flex", flexDirection: "column", flexShrink: 0, overflow: "hidden", position: "relative" }}>
             <div
               style={{
                 display: "flex",
@@ -4862,6 +4873,7 @@ export default function Editor({ initialLang, onReady }: { initialLang: Lang; on
                   }}
                 />
               )}
+            </div>
             </div>
           </aside>
         )}

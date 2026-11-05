@@ -275,7 +275,7 @@ export function FrameInspector({
             </div>
           </div>
         </Section>
-        <Section id="frame-style" icon="palette" title={t("style", lang)} p={p}>
+        <Section id="frame-style" icon="palette" title={t("style", lang)} p={p} defaultOpen>
           <ScreenFillRun
             value={frame.bg ?? "surface"}
             onChange={(bg) => onChange({ bg })}

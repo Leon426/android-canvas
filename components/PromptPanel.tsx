@@ -466,7 +466,7 @@ export function PromptPanel({
           readOnly
           corner={
             <div style={{ display: "flex", width: "100%", justifyContent: "flex-end" }}>
-              <div className="m3-run" style={{ display: "flex", gap: 3 }}>
+              <div className="m3-run" style={{ display: "flex", gap: 3, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <CopyButton copied={copied} onClick={copy} p={p} />
                 <IconBtn icon="open_in_full" p={p} size={44} on onClick={open} title={t("fullscreen", lang)} />
               </div>

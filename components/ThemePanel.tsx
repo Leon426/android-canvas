@@ -62,7 +62,7 @@ function OptionCard({
 export function ShapePanel({ p, theme, onChange }: { p: Palette; theme: Theme; onChange: (patch: Partial<Theme>) => void }) {
   const lang = useLang();
   return (
-    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 12px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: p.onSurfaceVariant, padding: "0 4px" }}>{t("shapeScale", lang)}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {SHAPES.map((sh) => {
@@ -110,7 +110,7 @@ export function ShapePanel({ p, theme, onChange }: { p: Palette; theme: Theme; o
 export function TypePanel({ p, theme, onChange }: { p: Palette; theme: Theme; onChange: (patch: Partial<Theme>) => void }) {
   const lang = useLang();
   return (
-    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 12px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: p.onSurfaceVariant, padding: "0 4px" }}>{t("fontFamily", lang)}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {FONTS.map((f) => {
@@ -162,7 +162,7 @@ export function MotionPanel({ p, theme, onChange }: { p: Palette; theme: Theme; 
     ? { type: "spring" as const, stiffness: 380, damping: 18, mass: 1 }
     : { duration: 0.35, ease: [0.2, 0, 0, 1] as const };
   return (
-    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 12px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="no-scrollbar" style={{ height: "100%", overflowY: "auto", padding: "12px 6px 20px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: p.onSurfaceVariant, padding: "0 4px" }}>{t("motionScheme", lang)}</div>
       <div style={{ display: "flex", gap: 6 }}>
         <OptionCard on={!expressive} onClick={() => { onChange({ motion: "standard" }); setTick((n) => n + 1); }} p={p} label={t("motionStandard", lang)}>
